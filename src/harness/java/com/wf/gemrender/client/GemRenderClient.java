@@ -22,6 +22,7 @@ import com.wf.gemrender.spike.GltfEffect;
 import com.wf.gemrender.spike.GltfVisual;
 import dev.engine_room.flywheel.lib.visualization.SimpleEntityVisualizer;
 import com.wf.gemrender.particle.ParticleBuffer;
+import com.wf.gemrender.spike.RopeSpikeEffect;
 import com.wf.gemrender.particle.ParticleClock;
 import com.wf.gemrender.spike.ParticleSpikeEffect;
 import com.wf.gemrender.spike.PartsEffect;
@@ -66,6 +67,8 @@ public final class GemRenderClient {
 	private static final int AUTO_PARTICLES = Integer.getInteger("gemrender.autoparticles", 0);
 
 	private static final int AUTO_VOLUMES = Integer.getInteger("gemrender.autovolumes", 0);
+
+	private static final int AUTO_ROPES = Integer.getInteger("gemrender.autoropes", 0);
 
 	private static final float PARTICLE_EXTENT = 10.0f;
 
@@ -249,6 +252,16 @@ public final class GemRenderClient {
 			return;
 		}
 
+		if (AUTO_ROPES > 0) {
+			// A rope needs nothing loaded -- the mesh is generated and the curve is on the instance --
+			// so it is live as soon as the scene is queued. Its own branch all the same, because the
+			// gate below reports nothing at all for a scene with no asset and no cubes, which is how
+			// -Pdirect used to sit at no verdict forever.
+			SpikeHud.status("want ropes  x" + AUTO_ROPES + "  rings=" + RopeSpikeEffect.RINGS
+					+ "  sides=" + RopeSpikeEffect.SIDES + "  live", false);
+			return;
+		}
+
 		if (asset == null && AUTO_SPIKE <= 0) {
 			SpikeHud.status("", false);
 			return;
@@ -380,6 +393,9 @@ public final class GemRenderClient {
 		if (AUTO_VOLUMES > 0) {
 			return AUTO_VOLUMES;
 		}
+		if (AUTO_ROPES > 0) {
+			return AUTO_ROPES;
+		}
 		return AUTO_SPIKE;
 	}
 
@@ -481,7 +497,9 @@ public final class GemRenderClient {
 					: AUTO_PARTICLES > 0 ? PARTICLE_EXTENT
 							: AUTO_VOLUMES > 0
 									? com.wf.gemrender.spike.VolumeSpikeEffect.SIZE * 2.0f
-									: SpikeVisual.gridExtent(AUTO_SPIKE);
+									: AUTO_ROPES > 0
+											? RopeSpikeEffect.SPAN * 2.0f
+											: SpikeVisual.gridExtent(AUTO_SPIKE);
 			int back = CAMERA_BACK > 0
 					? CAMERA_BACK
 					: Math.max(CAMERA_MIN_BACK, Math.round(extent * CAMERA_BACK_FACTOR));
@@ -506,7 +524,10 @@ public final class GemRenderClient {
 				buildVanillaControls(connection, origin, asset);
 			}
 
-			boolean particleRow = asset == null && (AUTO_PARTICLES > 0 || AUTO_VOLUMES > 0);
+			// Ropes are laid out in a row like the particle emitters are, so the camera squares up to
+			// them rather than looking along the row from its corner.
+			boolean particleRow =
+					asset == null && (AUTO_PARTICLES > 0 || AUTO_VOLUMES > 0 || AUTO_ROPES > 0);
 			connection.sendCommand(particleRow
 					? String.format(java.util.Locale.ROOT, "tp @s %d %d %d %d %d",
 							origin.getX(), origin.getY() + up, origin.getZ() - back, AUTO_YAW, AUTO_PITCH)
@@ -1111,7 +1132,7 @@ public final class GemRenderClient {
 					.queueAdd(new GltfEffect(level, origin, asset, autoCount(),
 							System.getProperty("gemrender.autoanimation", "running_loop"), AUTO_SYNC, 1.0f,
 							AUTO_SPIN, spinNode, AUTO_SPIN_DUTY));
-		} else if (AUTO_PARTICLES == 0 && AUTO_VOLUMES == 0) {
+		} else if (AUTO_PARTICLES == 0 && AUTO_VOLUMES == 0 && AUTO_ROPES == 0) {
 			VisualizationManager.getOrThrow(level)
 					.effects()
 					.queueAdd(new SpikeEffect(level, origin, AUTO_SPIKE));
@@ -1127,6 +1148,12 @@ public final class GemRenderClient {
 			VisualizationManager.getOrThrow(level)
 					.effects()
 					.queueAdd(new com.wf.gemrender.spike.VolumeSpikeEffect(level, origin, AUTO_VOLUMES));
+		}
+
+		if (AUTO_ROPES > 0) {
+			VisualizationManager.getOrThrow(level)
+					.effects()
+					.queueAdd(new com.wf.gemrender.spike.RopeSpikeEffect(level, origin, AUTO_ROPES));
 		}
 	}
 

@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class ParticleStyleTest {
 	@Test
-	@DisplayName("a style writes its sixteen floats in the order the shader reads them")
+	@DisplayName("a style writes its twenty floats in the order the shader reads them")
 	void writesTheShaderLayout() {
 		ParticleStyle style = ParticleStyle.builder()
 				.drag(2.1f)
@@ -27,7 +27,35 @@ class ParticleStyleTest {
 		assertThat(target).startsWith(new float[ParticleStyle.FLOATS]);
 		assertThat(java.util.Arrays.copyOfRange(target, ParticleStyle.FLOATS, target.length))
 				.containsExactly(2.1f, 1.6f, 0.5f, 2.8f, 0.25f, 0.5f, 0.75f, 0.75f, 0.4f, 0.1f, 0.6f, 3.0f, 0.9f,
-						0.8f, 2.1f, 0.0f);
+						0.8f, 2.1f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+	}
+
+	@Test
+	@DisplayName("a contact response rides in the style's last texel, restitution first")
+	void writesTheContactTexel() {
+		ParticleStyle style = ParticleStyle.builder()
+				.bouncesOnContact(0.4f, 0.7f)
+				.build();
+
+		float[] target = new float[ParticleStyle.FLOATS];
+		style.write(target, 0);
+
+		assertThat(style.response).isEqualTo(ContactResponse.BOUNCE);
+		assertThat(style.collides()).isTrue();
+		assertThat(java.util.Arrays.copyOfRange(target, 16, 20))
+				.containsExactly(0.4f, 0.7f, ContactResponse.BOUNCE.ordinal(), 0.0f);
+	}
+
+	@Test
+	@DisplayName("a style says so when it has no reason to be swept for contact")
+	void inertStyleDoesNotCollide() {
+		assertThat(ParticleStyle.builder()
+				.build()
+				.collides()).isFalse();
+		assertThat(ParticleStyle.builder()
+				.stopsOnContact()
+				.build()
+				.collides()).isTrue();
 	}
 
 	@Test

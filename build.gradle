@@ -323,6 +323,17 @@ modding.with {
                 systemProperty 'gemrender.volumetrics', project.property('volumetrics').toString()
             }
 
+            if (project.hasProperty('ropes')) {
+                systemProperty 'gemrender.autoropes', project.property('ropes').toString()
+            }
+
+            ['ropeRadius': 'roperadius', 'ropeSpan': 'ropespan', 'ropeSides': 'ropesides',
+             'ropeRings': 'roperings', 'ropeSway': 'ropesway'].each { flag, prop ->
+                if (project.hasProperty(flag)) {
+                    systemProperty "gemrender.${prop}", project.property(flag).toString()
+                }
+            }
+
             if (project.hasProperty('radar')) {
                 systemProperty 'gemrender.autoradar', project.property('radar').toString()
             }

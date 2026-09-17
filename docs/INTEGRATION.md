@@ -1127,7 +1127,7 @@ if you enable a scissor immediately after drawing GemRender items and before any
   composite wrongly against each other. Alpha-masked geometry, which is nearly all of it, is unaffected.
 - **Shader packs.** This path draws with its own program, so a pack neither shades it nor breaks it;
   it looks the same under a pack as without one. That is the opposite of the world path's behaviour
-  (§8).
+  (§9).
 
 ## 7. Particles
 
@@ -1144,9 +1144,10 @@ invocations and one draw, and zero Java.
 | | |
 |---|---|
 | `GemRenderParticleTypes` | `BILLBOARD`, `MESH`, and `custom(vert, cull)` for your own shader |
-| `ParticleStyle` | the curves every particle in a family shares: drag, gravity, how it grows, how it fades. Registered once, at most 64 of them |
+| `ParticleStyle` | the curves every particle in a family shares: drag, gravity, how it grows, how it fades, and what it does when it hits a block. Registered once, at most 256 of them |
 | `ParticleEmitter` | owns a block of slots and a spawn cursor. Lives as long as the effect does, **not** as long as the visual |
 | `ParticlePool` | the Flywheel side: one instance per slot, created in the visual, deleted with it |
+| `ContactResponse` | `NONE`, `STOP`, `BOUNCE`, `DIE` — what a particle does when its flight runs into the world |
 | `GemRenderParticleTypes` | `BILLBOARD` for camera-facing quads, `MESH` for a model oriented along its own velocity |
 
 ### Registering a style
@@ -1162,6 +1163,11 @@ private static final int EXHAUST = ParticleBuffer.getInstance()
                 .cool(0.1f, 0.6f)
                 .build());
 ```
+
+The table holds 256 styles and the whole of it is 20 KiB whether it is full or holds one, so it is
+generous on purpose — but it is still finite, and running out throws. A caller that caches a style per
+tint, or per tint *and* light level, climbs faster than it looks like it should: be ready to fall back
+to a near-enough style rather than let an exception out of a particle spawn.
 
 `dragFromPerTickFactor` and `gravityFromPerTickDelta` exist because most existing particle code is
 written as a per-tick loop – `v *= 0.9`, `vy += 0.004`. Those are a geometric series and a constant
@@ -1211,6 +1217,19 @@ public final class ExhaustVisual extends AbstractVisual
 }
 ```
 
+**Drawing from an atlas instead of a texture of your own.** A particle that is a chip of a block
+samples the terrain sheet, and which sprite it samples is fixed when the model is built rather than per
+particle — so it is baked into the mesh, and costs no room in the particle layout:
+
+```java
+TextureAtlasSprite sprite = ...;
+Model chip = ParticleModels.sprite(
+        ParticleQuad.ofUv(sprite.getU0(), sprite.getV0(), sprite.getU1(), sprite.getV1()),
+        InventoryMenu.BLOCK_ATLAS);
+```
+
+Cached per sprite, so every chip off the same block shares a model and therefore a draw call.
+
 There is no `beginFrame`. If you find yourself writing one, the thing you want to vary per frame
 probably belongs in the style or in the closed form instead.
 
@@ -1219,6 +1238,89 @@ probably belongs in the style or in the closed form instead.
 `GemRenderParticleTypes.MESH` takes any Flywheel `Model` instead of the built-in quad and orients it
 so **the model's +Y points along its velocity**, with `spin` rolling it about that axis. Debris,
 casings, sparks with a length. Everything else – the style, the emitter, the pool – is identical.
+
+### Contact
+
+A particle cannot discover a wall while it flies: it has no state to read, which is the trade that
+buys everything else on this page. What it can be is **told in advance**. The trajectory is a closed
+form, so the whole arc is knowable the moment the particle is born; sweeping it against the world
+once, at spawn, produces two ages that ride in the particle's own slot, and the flight is still a
+closed form evaluated in the vertex shader with nothing written per frame.
+
+Say what a contact means on the style:
+
+```java
+private static final int RUBBLE = ParticleBuffer.getInstance()
+        .registerStyle(ParticleStyle.builder()
+                .gravity(20.0f)
+                .stopsOnContact()                  // lands and stays, keeping the attitude it hit with
+                .build());
+```
+
+| | |
+|---|---|
+| `stopsOnContact()` | comes to rest on the first block and holds there. Rubble, casings, gore |
+| `bouncesOnContact(restitution, friction)` | rebounds once, then settles where that rebound lands |
+| `diesOnContact()` | vanishes at the wall. Free: it is a particle with a shorter life |
+| *(nothing)* | flies through everything, and is never swept |
+
+Then spawn through the level rather than past it:
+
+```java
+emitter.spawn(level, x, y, z, vx, vy, vz, life, size);
+
+// A mesh particle has extent, so tell it how much, or it lands half inside the floor.
+emitter.spawn(level, x, y, z, vx, vy, vz, life, size, spinPhase, tintScale, 0.35f);
+```
+
+**The style decides whether the sweep happens at all.** A style with no response never touches the
+world, so adding the level to a spawn call costs nothing until you ask for something.
+
+For a burst in the thousands, hoist the probe. It remembers the blocks it has already looked at, and
+a thousand particles leaving one point walk mostly the same ground:
+
+```java
+ParticleCollision.Probe probe = LevelContactProbe.of(level);
+for (int i = 0; i < 1000; i++) {
+    emitter.spawn(probe, x, y, z, vx(i), vy(i), vz(i), life, size, 0.0f, 1.0f, 0.35f);
+}
+```
+
+`ParticleEmitter` already does this for you within a frame – the convenience overload keeps one probe
+for as long as the clock stands still – so the explicit form is for when you want to control the
+cache's lifetime yourself. Either way it reads blocks, so **call it from the thread that owns the
+level**: a tick or an event handler, never a visual's constructor.
+
+To find out where one ended up – a sound, a decal, a scorch mark, the burst a shattering particle
+leaves behind – every `spawn` hands back what its sweep found, so you do not have to predict twice:
+
+```java
+ParticleCollision.Contact contact = emitter.spawn(probe, x, y, z, vx, vy, vz, life, size, 0f, 1f, 0.35f);
+Vector3f restingPlace = ParticleCollision.positionAt(style, spawn, velocity, contact, contact.restAge(),
+        new Vector3f());
+```
+
+A `DIE` style records no contact – it shortens the life instead – so for one of those, "it hit
+something" is `contact.life() < the life you asked for`, and the moment it hit is `contact.life()`.
+
+**How finely the arc is swept.** Each chord is sized from the acceleration the closed form is applying
+*at that point* – the pull, less what drag is already taking back – against the same tenth-of-a-block
+sagitta. Measuring it locally rather than once at birth is what makes the sweep hold for a flight of
+any length: a particle still accelerating gets short chords for as long as it is, and one at terminal
+velocity is travelling in a straight line at a constant speed, so a single chord describes the whole
+rest of its flight exactly. Sizing the step once from the speed at birth and then stretching it to fit
+gets both halves wrong — and gets them wrong *silently*, because a chord that is crossed at a wildly
+varying speed maps its hit fraction to the wrong age, and the particle then freezes wherever the closed
+form really is at that age. In the air, usually, above the floor it was told it had reached.
+
+**What prediction cannot do**, all three of which follow from it being a prediction:
+
+- **Geometry that moves after the spawn.** A particle in flight when a wall is built lands where the
+  wall was not. A block *mined* mid-flight is the more common case and looks the same.
+- **More than one rebound.** Each is a separate arc to predict and to store; past the first, nobody is
+  counting.
+- **Exactness to better than the chord.** The arc is followed in straight segments sized so that no
+  chord cuts more than a tenth of a block off the curve. Contacts land within that.
 
 ### Your own particle shader
 
@@ -1259,10 +1361,15 @@ any namespace can read the buffer.
 
 ### What a closed form cannot do
 
-No collision, and no force that depends on another particle. Both need the previous frame's state,
-and a particle here has no state to read: that is the trade that buys the zero per-frame cost and the
-identical result on every backend. Wind, drag, gravity, buoyancy, growth and fade are all fine,
-because none of them need to know what happened last frame.
+No force that depends on another particle, and nothing that has to react to the world *after* it set
+off. Both need the previous frame's state, and a particle here has no state to read: that is the trade
+that buys the zero per-frame cost and the identical result on every backend. Wind, drag, gravity,
+buoyancy, growth and fade are all fine, because none of them need to know what happened last frame.
+
+Collision used to be on that list and no longer is, but it is worth being clear about why: contact is
+not simulated, it is **predicted at spawn** (see [Contact](#contact)) and then evaluated in closed form
+like everything else. That is what keeps it free per frame, and it is also exactly why a particle
+cannot notice a wall that appeared while it was in the air.
 
 ### Shader packs
 
@@ -1286,6 +1393,30 @@ make it deliberately.
 - `translucent(texture)` – `ORDER_INDEPENDENT`. The best-looking of the three and by far the most
   expensive.
 
+#### Only two of the three can be ordered against water
+
+This is not a matter of taste, and it is the one way the cheap choice can look broken rather than
+plain. Flywheel draws its instances after entities and **before** vanilla's translucent terrain, so a
+particle over a lake is drawn before the lake is.
+
+- `cutout` is right by construction. It is opaque where it draws at all, so it writes depth honestly:
+  water behind it is correctly rejected, water in front of it is correctly drawn over it.
+- `translucent` is right because `WaterSplit` splits it. The OIT stack is cut at the water surface and
+  each half composites on its own side of it.
+- **`additive` has no right answer.** It is blended, so writing depth would delete the water behind it
+  — a puff-shaped hole with the lake bed showing through, with the hard edges of the quads rather than
+  the soft edges of the sprite. It therefore writes none (`WriteMask.COLOR`), which means the water
+  pass paints over it instead: an additive glow in front of a water surface is dimmed by it, and a
+  bright one over a thick surface disappears. That is a misordering rather than an erasure, and it is
+  the better of the two, but it is still wrong.
+
+So: additive is for what a misordering does not matter to — a muzzle flash, a spark, something at the
+player's own position — and for anything that has to read correctly over water, pick one of the other
+two. A smoke trail is `translucent`; a dust plume is `cutout`.
+
+Blended particle materials write no depth at all, for the same reason. If you want a blended particle
+to occlude, you want `cutout`.
+
 For exhaust and dust – many particles, mostly not the thing the player is looking at – use `cutout`.
 Push the alpha test up (`ParticleModels.billboard(texture, Transparency.OPAQUE, CutoutShaders.HALF)`)
 and let the texture's own alpha carve the silhouette rather than scaling alpha down in the style;
@@ -1294,9 +1425,37 @@ squares.
 
 ### Cost
 
-Per spawn: one 48-byte write. Per frame, per particle: nothing on the CPU. `instanceWrites=0` – no
+Per spawn: one 64-byte write. Per frame, per particle: nothing on the CPU. `instanceWrites=0` – no
 instance is rewritten after the frame it was created in – and the only per-frame work left is one
 `glBufferSubData` per run of dirty pages, which measures at 1 µs.
+
+**Contact costs only at spawn**, and only for a style that asked for it. A burst of a thousand
+colliding particles sweeps in **1.22 ms**, once, on the thread that spawned it; the frame after, they
+are the same zero-cost particles as any other. Two things are doing that work:
+
+| | 1 000 colliding spawns |
+| --- | --- |
+| sweep, walking probe | **1.22 ms** |
+| sweep, one `BlockGetter.clip` per segment | 1.84 ms |
+| blocks the level was asked about, walking probe | **2 233** |
+| blocks the level was asked about, clipping | 46 500 |
+| blocks asked about at 2 000 particles | 2 507 (**1.12x**, not 2x) |
+
+The last row is the one that matters for scale: what the level is asked is bounded by the *volume the
+burst covers*, not by how many particles are in it, because they all cross the same ground and the
+probe remembers it. Doubling the particles costs 12% more lookups. The other lever is the arc itself –
+segments are sized by how hard the path is bending **at each point along it**, so the straight parts of
+a flight are crossed in one long chord and only the parts that actually arc pay for the arc. A particle
+that has reached terminal velocity is accelerating at nothing, and the whole rest of its flight is one
+segment however long it lives.
+
+`ParticleSweepScaleTest` is where those numbers come from and will tell you if they move.
+
+In a running game, measured on the same machine at 1920x1080: a volley of 49 explosions throwing about
+**1 500 colliding mesh particles** — chunks of real block geometry, not billboards — held **163 fps
+against a 169 fps empty-scene baseline**, GPU load unchanged at 8-10%. The spawn frame is the expensive
+one and it is the one in that number: 196 models baked and 1 500 arcs swept in a single tick. Every
+frame after it is free.
 
 That leaves the GPU, and there the whole cost is which `Transparency` you picked, not how many
 particles you have. Measured on one machine (RX 7900 XTX, Mesa 26.2, `indirect` backend) at
@@ -1371,6 +1530,11 @@ Two things do reliably avoid the tax: **Fabulous graphics**, where `modeActive()
 split never runs at all, and not being on the `ORDER_INDEPENDENT` path in the first place. The second
 is the one you control, and the fill numbers above already recommend it on their own.
 
+Leaving the path costs you the ordering, though, and only one of the two exits keeps it: `cutout`
+writes depth and is correct against water without the split, while `additive` is neither split nor
+depth-writing and is simply drawn under the water. See "Only two of the three can be ordered against
+water" above before treating this as a free win.
+
 ### Clouds are in the split too
 
 Water is not the only vanilla translucent surface drawn after Flywheel's composite. That composite
@@ -1417,7 +1581,128 @@ the pool ten to twenty per cent above `rate x life` if you want the full count o
 
 ---
 
-## 8. Things that will bite
+## 8. Ropes, cables and chains
+
+A rope is the same idea as a particle, applied once more: its shape is a **closed form of its two
+endpoints**, so the vertex shader can work out where every ring of it goes and the CPU writes only
+where the ends are. One rope is one instance of a shared tube mesh. A hundred of them are one draw.
+
+Vanilla does the opposite — `renderLeash` builds a strip of quads into a `VertexConsumer` every frame,
+per lead, and none of them batch. That is the cost this replaces.
+
+### What it is for
+
+Leads and leashes, tow cables, power lines, rigging, a winch, a tethered balloon, an anchor chain.
+Anything where two things are connected and the connection should be visible. It is **decoration**:
+nothing here is simulated, collidable or synced, and there is no rope physics. If you want a rope that
+does something, drive its endpoints from whatever already does that thing.
+
+### Drawing one
+
+```java
+public final class MooringVisual extends AbstractVisual {
+    private final RopeInstance rope;
+
+    public MooringVisual(VisualizationContext ctx, ...) {
+        this.rope = ctx.instancerProvider()
+                .instancer(GemRenderRopeTypes.ROPE, RopeModels.cutout(CHAIN))
+                .createInstance();
+
+        rope.between(x, y, z, x, floor, z)
+                .slack(1.01f)
+                .radius(0.055f)
+                .tiling(y - floor)
+                .litUniformly(light)
+                .refresh()
+                .setChanged();
+    }
+}
+```
+
+Endpoints are relative to the render origin, like every other Flywheel instance. Move them and call
+`setChanged()`; that is six floats, and it is the only per-frame cost a rope has.
+
+### The shape
+
+| | |
+|---|---|
+| `sag(blocks)` | how far it droops below the straight line, at its deepest |
+| `slack(ratio)` | the same thing said the other way: 1.0 is taut, 1.2 is a fifth longer than the gap |
+| `length(blocks)` | and the same again, as an absolute length of rope |
+| `radius(blocks)` | how thick it is |
+| `tiling(repeats)` | how many times the texture repeats along it |
+| `twist(turns)` | full turns of the cross-section end to end, for a braid or a link |
+| `sway(amplitude, frequency, phase, waves)` | a drift across the rope, pinned to zero at both ends |
+
+`slack` and `length` **solve for the sag on the spot**, so call them after setting the endpoints.
+The solve is a bisection on arc length and it happens once per change, not once per vertex — the
+answer is the same for all several hundred of them.
+
+**They mean nothing on a rope that hangs straight down, and they will not say so.** The sag is along
+-Y, so when the two ends share a column it slides points *along* the rope rather than bowing it: the
+length barely responds until the curve doubles back, and then jumps. A twenty-block vertical rope asked
+for 1% of slack is handed a sag of 5.7 — length-correct, drawn in exactly the same place, and with half
+the texture's repeats crammed into the bottom fifth. For anything vertical, including every mooring and
+every hanging chain, set `sag` yourself; zero is right for a taut one and the shape is identical anyway.
+
+The curve is a **parabola, not a catenary**, and that is deliberate rather than an approximation taken
+for speed. The closed-form catenary is a function of horizontal distance, so it has no value at all
+when one endpoint is directly above the other — which is the case a mooring chain is in for its whole
+life. The parabola is defined everywhere, is what a uniformly loaded cable actually hangs in, and at
+the sag ratios anything in a game uses the two differ by well under a pixel.
+
+Give `sway` a **phase that is a function of something stable** — a block position, an entity id — not a
+random. A random looks identical on frame one and jumps every time Flywheel rebuilds the visual, which
+it does whenever the render origin moves. Same rule as `AnimationPhase.scattered`.
+
+### Lighting
+
+`light` is the near end and `lightB` the far one, interpolated along the rope. `litUniformly(l)` sets
+both. A chain hanging from a lit surface into a dark one is the case this exists for; giving both ends
+one value makes a fifty-block rope uniformly bright.
+
+### Tessellation and materials
+
+`RopeModels.solid`, `.cutout` and `.absorbance` take an optional `rings, sides`. Rings is along the
+rope — 16 is enough that a rope bent double has no visible flats. Sides is around it, and **4 is what
+a vanilla lead looks like**, which is usually what you want; a thick chain seen close wants 6 or 8.
+
+Use `.cutout` for anything whose texture has holes in it, which includes every chain texture. Use
+`.absorbance` for a rope hanging in water: it joins the water split's absorbance pass, so it is tinted
+and faded by depth instead of drawn flat through a hundred blocks of ocean (§7).
+
+The tube is **capped at both ends**, because Flywheel culls backfaces and an open tube does not read
+as an open tube — it reads as a missing face.
+
+### Your own rope shader
+
+Same escape hatch as particles. Declare an instance type over the same layout and include the shipped
+curve, so what you draw and what the cull shader tests stay the same thing:
+
+```java
+private static final InstanceType<RopeInstance> CABLE = GemRenderRopeTypes.custom(
+        ResourceLocation.fromNamespaceAndPath(MOD_ID, "instance/cable.vert"),
+        ResourceLocation.fromNamespaceAndPath(MOD_ID, "instance/cull/cable.glsl"));
+```
+
+```glsl
+#include "gemrender:rope.glsl"
+```
+
+`gemrender_ropePoint`, `gemrender_ropeTangent`, `gemrender_ropeFrame` and `gemrender_ropeSway` are the
+whole of it. `RopeCurve` is the same construction in Java, for tests and for anything that needs to
+know where a rope is without asking the GPU.
+
+### What it costs
+
+Per rope, per frame: nothing, unless an endpoint moved, and then 84 bytes. Per rope, ever: one cull
+invocation. The draw is shared with every other rope of the same model.
+
+The one number to watch is `rings x sides x 4` vertices per rope, all of which are transformed whether
+the rope is 2 blocks long or 60. At the default that is 288 per rope — comparable to a small model, and
+the reason to turn the tessellation *down* for something thin and short rather than up.
+
+## 9. Things that will bite
 
 Failure modes that render something plausible rather than throwing.
 
@@ -1486,6 +1771,7 @@ Every place vanilla draws a model or an item, and what carries it there. All thr
 | Worn armour, on a mob and in a screen | `GemRenderArmorModel` | 6 |
 | Entity or item drawn *inside a screen* | rerouted automatically; you do not pick the pass | 6 |
 | Particles | `ParticleEmitter` + `ParticlePool` | [7](#7-particles) |
+| A connection between two points | `RopeInstance` | [8](#8-ropes-cables-and-chains) |
 
 Two things that are deliberately not on it. **A static block is not a target** -- a GemRender model needs
 a block entity, because Flywheel does no static-block instancing and there is no chunk-mesh route.
@@ -1525,8 +1811,12 @@ The types a consumer actually touches.
 | `ParticleEmitter` | `create(style, capacity, x, y, z)`, `spawn(...)`, `isIdle()`, `close()`. Held by the effect, not the visual |
 | `ParticlePool` | `new ParticlePool(ctx, emitter, type, model)` in the visual, `delete()` with it |
 | `GemRenderParticleTypes` | `BILLBOARD` and `MESH`, the two instance types to pass to `ParticlePool` |
-| `ParticleModels` | `additive`, `cutout` and `translucent` billboards; `cutout` is the cheap one |
+| `ParticleModels` | `additive`, `cutout` and `translucent` billboards; `cutout` is the cheap one, `additive` the one that cannot be ordered against water |
 | `ParticleMotion` | the closed form in Java, for tests and for CPU-side code that needs a particle's position |
+| `GemRenderRopeTypes` | `ROPE`, the instance type to pass to `instancer(...)`, and `custom(vert, cull)` (section 8) |
+| `RopeInstance` | one rope: `between`, `sag`/`slack`/`length`, `radius`, `tiling`, `twist`, `sway`, `lightB`, `refresh` |
+| `RopeModels` | `solid`, `cutout` and `absorbance` tubes, each taking an optional `rings, sides` |
+| `RopeCurve` | the curve in Java: `point`, `tangent`, `frame`, `length`, `sagForLength`, `sagForSlack`, `sphere` |
 | `GemRenderItemRenderer` | items, in every context (section 6). `of(model, clip)`, `register(id, renderer)`, `get(id)`, `animates(stack, context)` |
 | `ItemAppearance` | what a stack looks like per context: `model`, `clip`, `seconds`, `transform`, `variant`, `tint` |
 | `GemRenderArmorModel` | worn armour. `prepare(entity, stack, slot)`, `DEFAULT_BONES` |

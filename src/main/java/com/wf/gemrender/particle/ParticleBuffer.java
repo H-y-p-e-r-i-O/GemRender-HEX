@@ -19,9 +19,23 @@ import static org.lwjgl.opengl.GL33C.*;
 public final class ParticleBuffer {
     public static final int TEXTURE_UNIT = TextureUnits.PARTICLES;
 
-    public static final int MAX_STYLES = 64;
+    /**
+     * How many distinct appearances the buffer holds.
+     *
+     * <p>Generous on purpose. A style is 80 bytes, so the whole table is 20 KiB whether it is full or holds
+     * one — but a caller that caches a style per tint, or per tint and light level, climbs faster than it
+     * looks like it should, and running out is an exception rather than a dimmer particle. Must match
+     * {@code GEMRENDER_MAX_STYLES} in {@code particle.glsl}; {@code ParticleLayoutTest} is what enforces that.
+     */
+    public static final int MAX_STYLES = 256;
 
-    public static final int PARTICLE_FLOATS = 12;
+    /**
+     * Four texels a particle: twelve floats of spawn state and four of what it runs into.
+     *
+     * <p>Sixteen rather than the fourteen actually in use because a particle is fetched as whole texels, and
+     * a slot that is not a multiple of four straddles them.
+     */
+    public static final int PARTICLE_FLOATS = 16;
 
     public static final int STYLE_REGION_FLOATS = MAX_STYLES * ParticleStyle.FLOATS;
 
@@ -89,6 +103,13 @@ public final class ParticleBuffer {
         }
     }
 
+    /** The registered style behind an index, which is what a spawn needs to know how to sweep for contact. */
+    public ParticleStyle style(int index) {
+        synchronized (lock) {
+            return index >= 0 && index < styles.size() ? styles.get(index) : null;
+        }
+    }
+
     public int styleCount() {
         synchronized (lock) {
             return styles.size();
@@ -131,6 +152,18 @@ public final class ParticleBuffer {
 
     public void write(int slot, float x, float y, float z, float spawnTime, float velocityX, float velocityY,
                       float velocityZ, float life, int style, float sizeScale, float spinPhase, float tintScale) {
+        write(slot, x, y, z, spawnTime, velocityX, velocityY, velocityZ, life, style, sizeScale, spinPhase,
+                tintScale, ParticleCollision.NEVER, ParticleCollision.PLUS_Y, ParticleCollision.NEVER);
+    }
+
+    /**
+     * @param contactAge    seconds from spawn to the first surface, or {@link ParticleCollision#NEVER}
+     * @param contactNormal the face hit, as one of {@link ParticleCollision}'s six constants
+     * @param restAge       seconds from spawn to where it settles; equal to {@code contactAge} to stop dead
+     */
+    public void write(int slot, float x, float y, float z, float spawnTime, float velocityX, float velocityY,
+                      float velocityZ, float life, int style, float sizeScale, float spinPhase, float tintScale,
+                      float contactAge, int contactNormal, float restAge) {
         synchronized (lock) {
             int at = STYLE_REGION_FLOATS + slot * PARTICLE_FLOATS;
 
@@ -146,6 +179,10 @@ public final class ParticleBuffer {
             data[at + 9] = sizeScale;
             data[at + 10] = spinPhase;
             data[at + 11] = tintScale;
+            data[at + 12] = contactAge;
+            data[at + 13] = contactNormal;
+            data[at + 14] = restAge;
+            data[at + 15] = 0.0f;
 
             markDirty(at, PARTICLE_FLOATS);
         }

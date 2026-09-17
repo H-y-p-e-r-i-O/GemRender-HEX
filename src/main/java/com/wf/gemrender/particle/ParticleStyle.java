@@ -1,7 +1,7 @@
 package com.wf.gemrender.particle;
 
 public final class ParticleStyle {
-    public static final int FLOATS = 16;
+    public static final int FLOATS = 20;
 
     public static final float FULL_BRIGHT = 240.0f / 256.0f;
 
@@ -21,6 +21,9 @@ public final class ParticleStyle {
     public final float lightBlock;
     public final float lightSky;
     public final float fadeIn;
+    public final float restitution;
+    public final float friction;
+    public final ContactResponse response;
 
     private final float[] data;
 
@@ -42,13 +45,22 @@ public final class ParticleStyle {
         lightSky = data[13];
         dragY = data[14];
         fadeIn = data[15];
+        restitution = data[16];
+        friction = data[17];
+        ContactResponse[] responses = ContactResponse.values();
+        response = responses[Math.max(0, Math.min(responses.length - 1, (int) data[18]))];
     }
 
-    public static ParticleStyle of(float... sixteen) {
-        if (sixteen.length != FLOATS) {
-            throw new IllegalArgumentException("A style is " + FLOATS + " floats, got " + sixteen.length);
+    /** Whether a spawn through this style is worth sweeping for a contact at all. */
+    public boolean collides() {
+        return response != ContactResponse.NONE;
+    }
+
+    public static ParticleStyle of(float... floats) {
+        if (floats.length != FLOATS) {
+            throw new IllegalArgumentException("A style is " + FLOATS + " floats, got " + floats.length);
         }
-        return new ParticleStyle(sixteen.clone());
+        return new ParticleStyle(floats.clone());
     }
 
     public static Builder builder() {
@@ -88,6 +100,9 @@ public final class ParticleStyle {
         private float spinRate = 0.0f;
         private float lightBlock = FULL_BRIGHT;
         private float lightSky = FULL_BRIGHT;
+        private ContactResponse response = ContactResponse.NONE;
+        private float restitution = 0.0f;
+        private float friction = 0.0f;
 
         private Builder() {
         }
@@ -154,11 +169,45 @@ public final class ParticleStyle {
             return this;
         }
 
+        /**
+         * Come to rest on the first block hit, and hold the attitude of the impact.
+         */
+        public Builder stopsOnContact() {
+            response = ContactResponse.STOP;
+            restitution = 0.0f;
+            friction = 0.0f;
+            return this;
+        }
+
+        /**
+         * Rebound once and settle where that rebound lands.
+         *
+         * @param restitution fraction of the velocity <em>into</em> the surface that comes back out; 0 is a
+         *                    dead stop and 1 is a perfect rebound
+         * @param friction    fraction of the velocity <em>along</em> the surface that survives; 1 slides
+         *                    freely, 0 kills the skid
+         */
+        public Builder bouncesOnContact(float restitution, float friction) {
+            response = ContactResponse.BOUNCE;
+            this.restitution = Math.max(0.0f, Math.min(1.0f, restitution));
+            this.friction = Math.max(0.0f, Math.min(1.0f, friction));
+            return this;
+        }
+
+        /** Vanish on the first block hit. */
+        public Builder diesOnContact() {
+            response = ContactResponse.DIE;
+            restitution = 0.0f;
+            friction = 0.0f;
+            return this;
+        }
+
         public ParticleStyle build() {
             return ParticleStyle.of(drag, gravity, sizeAtBirth, sizeGrowth,
                     tintRed, tintGreen, tintBlue, alphaScale,
                     alphaFalloff, coolFloor, coolSpan, spinRate,
-                    lightBlock, lightSky, dragYSet ? dragY : drag, fadeIn);
+                    lightBlock, lightSky, dragYSet ? dragY : drag, fadeIn,
+                    restitution, friction, response.ordinal(), 0.0f);
         }
     }
 }
