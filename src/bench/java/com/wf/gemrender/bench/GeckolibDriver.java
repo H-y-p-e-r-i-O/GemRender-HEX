@@ -3,6 +3,7 @@ package com.wf.gemrender.bench;
 import org.joml.Matrix4f;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.GemRender;
 
 import net.minecraft.client.Minecraft;
@@ -21,11 +22,11 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 import software.bernie.geckolib.util.RenderUtil;
 
 public final class GeckolibDriver implements BenchDriver {
-	private static final ResourceLocation MODEL = ResourceLocation.fromNamespaceAndPath(
+	private static final ResourceLocation MODEL = Ids.of(
 			GemRender.MOD_ID, "geo/pylon.geo.json");
-	private static final ResourceLocation ANIMATION = ResourceLocation.fromNamespaceAndPath(
+	private static final ResourceLocation ANIMATION = Ids.of(
 			GemRender.MOD_ID, "animations/pylon.animation.json");
-	private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath(
+	private static final ResourceLocation TEXTURE = Ids.of(
 			GemRender.MOD_ID, "models/pylon/pylon.png");
 
 	private static final RawAnimation CLIP =

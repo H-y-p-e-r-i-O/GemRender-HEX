@@ -3,6 +3,7 @@ package com.wf.gemrender.water;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.render.GlAudit;
+import com.wf.gemrender.render.LevelStage;
 import com.wf.gemrender.render.Vanilla;
 import net.minecraft.client.Minecraft;
 import org.lwjgl.opengl.GL11C;
@@ -57,22 +58,17 @@ import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
 */
 //?}
-//? if neoforge {
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-//?} else {
-/*import net.minecraftforge.client.event.RenderLevelStageEvent;
- *///?}
 
 final class WaterDepthPrepass {
 
     //? if >=26.1 {
-    /*static final boolean SUPPORTED = false;
+    /*static final boolean SUPPORTED = "force".equalsIgnoreCase(System.getProperty("gemrender.watersplit"));
      *///?} else {
     static final boolean SUPPORTED = true;
     //?}
 
     //? if >=26.1 {
-    /*static final boolean CLOUDS_SUPPORTED = false;
+    /*static final boolean CLOUDS_SUPPORTED = "force".equalsIgnoreCase(System.getProperty("gemrender.cloudsplit"));
      *///?} else {
     static final boolean CLOUDS_SUPPORTED = true;
     //?}
@@ -134,8 +130,8 @@ final class WaterDepthPrepass {
 
     //? if >=26.1 {
 	
-	/*private void replay(RenderLevelStageEvent event, RenderTarget main) {
-		ChunkSectionsToRender chunks = event.getLevelRenderState().chunkSectionsToRender;
+	/*private void replay(LevelStage stage, RenderTarget main) {
+		ChunkSectionsToRender chunks = stage.chunkSections();
 		if (chunks == null) {
 			return;
 		}
@@ -176,7 +172,7 @@ final class WaterDepthPrepass {
 	}
 *///?}
 
-    void run(RenderLevelStageEvent event, WaterSplitPrograms programs, boolean foldClouds) {
+    void run(LevelStage stage, WaterSplitPrograms programs, boolean foldClouds) {
         Minecraft mc = Minecraft.getInstance();
         RenderTarget main = mc.getMainRenderTarget();
         ensureSize(main.width, main.height);
@@ -188,11 +184,11 @@ final class WaterDepthPrepass {
         rendering = true;
         try {
             //? if >=26.1 {
-            /*replay(event, main);
+            /*replay(stage, main);
              *///?} else {
 
-            foldedClouds = foldClouds && drawCloudDepth(event);
-            redraw(event, programs, main, foldedClouds ? cloudDepthTexture : 0);
+            foldedClouds = foldClouds && drawCloudDepth(stage);
+            redraw(stage, programs, main, foldedClouds ? cloudDepthTexture : 0);
             //?}
         } finally {
             rendering = false;
@@ -204,7 +200,7 @@ final class WaterDepthPrepass {
     }
 
     //? if <26.1 {
-    private void redraw(RenderLevelStageEvent event, WaterSplitPrograms programs, RenderTarget main,
+    private void redraw(LevelStage stage, WaterSplitPrograms programs, RenderTarget main,
                         int cloudDepth) {
         GlStateManager._glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
@@ -216,28 +212,28 @@ final class WaterDepthPrepass {
         GlStateManager._depthFunc(GL_LEQUAL);
 
         //? if >=1.21 {
-        var camera = event.getCamera()
+        var camera = stage.camera()
                 .getPosition();
-        ((LevelRendererAccessor) event.getLevelRenderer()).gemrender$renderSectionLayer(
-                RenderType.translucent(), camera.x, camera.y, camera.z, event.getModelViewMatrix(),
-                event.getProjectionMatrix());
+        ((LevelRendererAccessor) stage.levelRenderer()).gemrender$renderSectionLayer(
+                RenderType.translucent(), camera.x, camera.y, camera.z, stage.modelViewMatrix(),
+                stage.projectionMatrix());
         //?} else {
-		/*var camera = event.getCamera()
+		/*var camera = stage.camera()
 				.getPosition();
-		((LevelRendererAccessor) event.getLevelRenderer()).gemrender$renderSectionLayer(
-				RenderType.translucent(), event.getPoseStack(), camera.x, camera.y, camera.z,
-				event.getProjectionMatrix());
+		((LevelRendererAccessor) stage.levelRenderer()).gemrender$renderSectionLayer(
+				RenderType.translucent(), stage.poseStack(), camera.x, camera.y, camera.z,
+				stage.projectionMatrix());
 *///?}
     }
 
-    private boolean drawCloudDepth(RenderLevelStageEvent event) {
+    private boolean drawCloudDepth(LevelStage stage) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.options.getCloudsType() == CloudStatus.OFF) {
             return false;
         }
         float cloudHeight = mc.level.effects()
                 .getCloudHeight();
-        if (Float.isNaN(cloudHeight) || !event.getFrustum()
+        if (Float.isNaN(cloudHeight) || !stage.frustum()
                 .isVisible(new AABB(-CLOUD_SLAB_REACH, cloudHeight - CLOUD_SLAB_MARGIN, -CLOUD_SLAB_REACH,
                         CLOUD_SLAB_REACH, cloudHeight + CLOUD_SLAB_MARGIN, CLOUD_SLAB_REACH))) {
             return false;
@@ -253,14 +249,14 @@ final class WaterDepthPrepass {
         GlStateManager._clearDepth(1.0);
         GlState.clear(GL_DEPTH_BUFFER_BIT);
 
-        var camera = event.getCamera()
+        var camera = stage.camera()
                 .getPosition();
 
         //? if >=1.21 {
-        mc.levelRenderer.renderClouds(event.getPoseStack(), event.getModelViewMatrix(),
-                event.getProjectionMatrix(), Vanilla.partialTick(), camera.x, camera.y, camera.z);
+        mc.levelRenderer.renderClouds(stage.poseStack(), stage.modelViewMatrix(),
+                stage.projectionMatrix(), Vanilla.partialTick(), camera.x, camera.y, camera.z);
         //?} else {
-		/*mc.levelRenderer.renderClouds(event.getPoseStack(), event.getProjectionMatrix(),
+		/*mc.levelRenderer.renderClouds(stage.poseStack(), stage.projectionMatrix(),
 				Vanilla.partialTick(), camera.x, camera.y, camera.z);
 *///?}
         return true;

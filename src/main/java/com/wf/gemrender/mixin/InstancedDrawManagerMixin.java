@@ -1,7 +1,9 @@
 package com.wf.gemrender.mixin;
 
 import com.wf.gemrender.water.Absorbance;
+//? if water {
 import com.wf.gemrender.water.WaterSplit;
+//?}
 import dev.engine_room.flywheel.backend.compile.PipelineCompiler;
 import dev.engine_room.flywheel.backend.engine.LightStorage;
 import dev.engine_room.flywheel.backend.engine.embed.EnvironmentStorage;
@@ -31,6 +33,7 @@ abstract class InstancedDrawManagerMixin {
         }
     }
 
+    //? if water {
     @Inject(method = "render", at = @At(value = "INVOKE",
             target = "Ldev/engine_room/flywheel/backend/engine/indirect/OitFramebuffer;composite()V"))
     private void gemrender$beforeComposite(LightStorage lightStorage, EnvironmentStorage environmentStorage,
@@ -38,4 +41,5 @@ abstract class InstancedDrawManagerMixin {
         WaterSplit.getInstance()
                 .beforeOitComposite(oitFramebuffer, () -> submitOitDraws(PipelineCompiler.OitMode.EVALUATE));
     }
+    //?}
 }

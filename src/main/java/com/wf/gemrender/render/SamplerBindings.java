@@ -15,6 +15,12 @@ public final class SamplerBindings {
     private SamplerBindings() {
     }
 
+    public static int[] units() {
+        return new int[] {BoneBuffer.TEXTURE_UNIT, MorphBuffer.TEXTURE_UNIT, ParticleBuffer.TEXTURE_UNIT,
+                VolumeBuffer.TEXTURE_UNIT, VolumeNoise.TEXTURE_UNIT, SceneDepth.TEXTURE_UNIT,
+                VolumeAtlas.TEXTURE_UNIT};
+    }
+
     public static void apply(GlProgram program) {
         program.setSamplerBinding("_gemrender_bones", BoneBuffer.TEXTURE_UNIT);
         program.setSamplerBinding("_gemrender_morphs", MorphBuffer.TEXTURE_UNIT);

@@ -1,5 +1,10 @@
 plugins {
     id "dev.kikugie.stonecutter"
+    // Declared here rather than in build.gradle because loom-back-compat resolves the Loom plugin
+    // against the controller's plugin dependencies, not the version subproject's. Both ids ship on
+    // one version line; the wrapper picks -remap below 26.1 and plain at and above.
+    id "net.fabricmc.fabric-loom-remap" version "1.16.3" apply false
+    id "net.fabricmc.fabric-loom" version "1.16.3" apply false
 }
 
 // The active version. Stonecutter REWRITES this exact line when you switch versions -- it matches it

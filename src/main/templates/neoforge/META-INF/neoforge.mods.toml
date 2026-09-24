@@ -51,6 +51,12 @@ config = "${direct_config}"
 # file from resources wherever iris_supported is false.
 [[mixins]]
 config = "gemrender.irisflw.mixins.json"
+
+# Colorwheel is the other implementation of the same bridge, and only one of the two can be installed
+# at a time. Its mixins name their targets by string, so the jar needs no Colorwheel on its compile
+# classpath and the config is inert on a launch without it.
+[[mixins]]
+config = "gemrender.colorwheel.mixins.json"
 <% } %>
 <% if (!flywheel_dependency) { %>
 # Where Flywheel is VENDORED into this jar there is no flywheel mod to register its own mixins, so

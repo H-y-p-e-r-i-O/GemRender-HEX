@@ -1,5 +1,6 @@
 package com.wf.gemrender.spike;
 
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.rope.GemRenderRopeTypes;
 import com.wf.gemrender.rope.RopeInstance;
 import com.wf.gemrender.rope.RopeModels;
@@ -19,7 +20,7 @@ import java.util.List;
 
 public final class RopeSpikeVisual extends AbstractVisual implements EffectVisual<RopeSpikeEffect> {
 	private static final ResourceLocation TEXTURE =
-			ResourceLocation.withDefaultNamespace("textures/block/chain.png");
+			Ids.vanilla("textures/block/chain.png");
 
 	private final List<RopeInstance> ropes = new ArrayList<>();
 

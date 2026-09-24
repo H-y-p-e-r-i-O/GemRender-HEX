@@ -1,5 +1,6 @@
 package com.wf.gemrender.spike;
 
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.particle.GemRenderParticleTypes;
 import com.wf.gemrender.particle.ParticleEmitter;
 import com.wf.gemrender.particle.ParticleModels;
@@ -18,7 +19,7 @@ public final class ParticleSpikeVisual extends AbstractVisual
 	public static final String BLEND = System.getProperty("gemrender.particleblend", "translucent");
 
 	private static final ResourceLocation TEXTURE =
-			ResourceLocation.withDefaultNamespace("textures/particle/big_smoke_4.png");
+			Ids.vanilla("textures/particle/big_smoke_4.png");
 
 	private final ParticleSpikeEffect effect;
 

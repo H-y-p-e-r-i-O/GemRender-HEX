@@ -1,5 +1,7 @@
 package com.wf.gemrender.gltf;
 
+import com.wf.gemrender.Ids;
+
 import com.wf.gemrender.GemRender;
 import dev.engine_room.flywheel.api.material.*;
 import dev.engine_room.flywheel.lib.material.CutoutShaders;
@@ -11,12 +13,12 @@ import org.jetbrains.annotations.Nullable;
 public record GltfMaterial(@Nullable ResourceLocation texture, AlphaMode alphaMode, float alphaCutoff,
                            boolean doubleSided, boolean pbr) {
     public static final ResourceLocation UNTEXTURED =
-            ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, "untextured");
+            Ids.of(GemRender.MOD_ID, "untextured");
     public static final float[] CUTOUTS = {0.0f, 0.1f, 0.5f};
     private static final boolean OIT = !"false".equalsIgnoreCase(System.getProperty("gemrender.oit"));
     private static final MaterialShaders PBR_SHADERS = new SimpleMaterialShaders(
-            ResourceLocation.fromNamespaceAndPath("flywheel", "material/default.vert"),
-            ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, "material/pbr.frag"));
+            Ids.of("flywheel", "material/default.vert"),
+            Ids.of(GemRender.MOD_ID, "material/pbr.frag"));
 
     public GltfMaterial(@Nullable ResourceLocation texture, AlphaMode alphaMode, float alphaCutoff,
                         boolean doubleSided) {

@@ -1,5 +1,8 @@
 package com.wf.gemrender.direct;
 
+import com.wf.gemrender.Ids;
+
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.render.BoneBuffer;
 import com.wf.gemrender.render.MorphBuffer;
@@ -68,7 +71,7 @@ final class DirectProgram {
     }
 
     private static String resource(String namespace, String path) throws IOException {
-        ResourceLocation id = ResourceLocation.fromNamespaceAndPath(namespace, path);
+        ResourceLocation id = Ids.of(namespace, path);
         try (InputStream in = Minecraft.getInstance()
                 .getResourceManager()
                 .open(id)) {
@@ -98,14 +101,14 @@ final class DirectProgram {
             light1Loc = glGetUniformLocation(program, "_gr_light1");
             alphaCutoffLoc = glGetUniformLocation(program, "_gr_alphaCutoff");
 
-            glUseProgram(program);
+            GlStateManager._glUseProgram(program);
             glUniform1i(glGetUniformLocation(program, "_gr_atlas"), DirectRenderer.UNIT_ATLAS);
             glUniform1i(glGetUniformLocation(program, "_gr_lightmap"), DirectRenderer.UNIT_LIGHTMAP);
             glUniform1i(glGetUniformLocation(program, "_gr_overlayTex"), DirectRenderer.UNIT_OVERLAY);
             glUniform1i(glGetUniformLocation(program, "_gemrender_bones"), BoneBuffer.direct()
                     .unit());
             glUniform1i(glGetUniformLocation(program, "_gemrender_morphs"), MorphBuffer.TEXTURE_UNIT);
-            glUseProgram(0);
+            GlStateManager._glUseProgram(0);
 
             created = true;
             GemRender.LOGGER.info("Direct program linked; items, armour and held models will draw "
@@ -124,7 +127,7 @@ final class DirectProgram {
     }
 
     void use() {
-        glUseProgram(program);
+        GlStateManager._glUseProgram(program);
     }
 
     void matrices(Matrix4f modelView, Matrix4f projection) {

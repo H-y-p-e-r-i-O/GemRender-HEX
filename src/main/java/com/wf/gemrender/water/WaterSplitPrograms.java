@@ -1,5 +1,7 @@
 package com.wf.gemrender.water;
 
+import com.wf.gemrender.Ids;
+
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.render.GlState;
@@ -49,7 +51,7 @@ final class WaterSplitPrograms {
     private boolean failed;
 
     private static void bindSamplers(int program) {
-        glUseProgram(program);
+        GlStateManager._glUseProgram(program);
         glUniform1i(glGetUniformLocation(program, "_gr_accumulate"), UNIT_ACCUMULATE);
         glUniform1i(glGetUniformLocation(program, "_gr_frontAccumulate"), UNIT_FRONT);
         glUniform1i(glGetUniformLocation(program, "_gr_depthRange"), UNIT_DEPTH_RANGE);
@@ -65,7 +67,7 @@ final class WaterSplitPrograms {
     }
 
     private static String resource(String namespace, String path) throws IOException {
-        ResourceLocation location = ResourceLocation.fromNamespaceAndPath(namespace, path);
+        ResourceLocation location = Ids.of(namespace, path);
         try (InputStream in = Minecraft.getInstance()
                 .getResourceManager()
                 .open(location)) {
@@ -145,7 +147,7 @@ final class WaterSplitPrograms {
             bindSamplers(absorbanceBehindProgram);
             bindSamplers(absorbanceFrontProgram);
 
-            glUseProgram(0);
+            GlStateManager._glUseProgram(0);
             vao = glGenVertexArrays();
             created = true;
             return true;
@@ -160,7 +162,7 @@ final class WaterSplitPrograms {
     void drawDepthCopy(int depthTexture, int secondTexture) {
         int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
         try {
-            glUseProgram(depthCopyProgram);
+            GlStateManager._glUseProgram(depthCopyProgram);
             glUniform1i(depthCopyDepthLoc, 0);
             glUniform1i(depthCopySecondLoc, 1);
             glUniform1f(depthCopyTwoSourcesLoc, secondTexture == 0 ? 0.0f : 1.0f);
@@ -170,7 +172,7 @@ final class WaterSplitPrograms {
             unbind(1);
             unbind(0);
         } finally {
-            glUseProgram(previousProgram);
+            GlStateManager._glUseProgram(previousProgram);
         }
     }
 
@@ -178,13 +180,13 @@ final class WaterSplitPrograms {
                     int cloudDepth) {
         int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
         try {
-            glUseProgram(behindProgram);
+            GlStateManager._glUseProgram(behindProgram);
             setZRange(behindZNearLoc, behindZFarLoc);
             bindCompositeTextures(accumulate, front, depthRange, coefficients, waterDepth, cloudDepth);
             drawFullscreen();
             unbindCompositeTextures();
         } finally {
-            glUseProgram(previousProgram);
+            GlStateManager._glUseProgram(previousProgram);
         }
     }
 
@@ -192,14 +194,14 @@ final class WaterSplitPrograms {
                    int cloudDepth, float cloudPhase) {
         int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
         try {
-            glUseProgram(frontProgram);
+            GlStateManager._glUseProgram(frontProgram);
             setZRange(frontZNearLoc, frontZFarLoc);
             glUniform1f(frontCloudPhaseLoc, cloudPhase);
             bindCompositeTextures(accumulate, front, depthRange, coefficients, waterDepth, cloudDepth);
             drawFullscreen();
             unbindCompositeTextures();
         } finally {
-            glUseProgram(previousProgram);
+            GlStateManager._glUseProgram(previousProgram);
         }
     }
 
@@ -218,7 +220,7 @@ final class WaterSplitPrograms {
     private void drawAccumulators(int program, int accumulate, int front) {
         int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
         try {
-            glUseProgram(program);
+            GlStateManager._glUseProgram(program);
             bind2d(UNIT_ACCUMULATE, accumulate);
             bind2d(UNIT_FRONT, front);
             GlStateManager._activeTexture(GL_TEXTURE0);
@@ -227,7 +229,7 @@ final class WaterSplitPrograms {
             unbind(UNIT_ACCUMULATE);
             GlStateManager._activeTexture(GL_TEXTURE0);
         } finally {
-            glUseProgram(previousProgram);
+            GlStateManager._glUseProgram(previousProgram);
         }
     }
 

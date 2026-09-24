@@ -2,6 +2,7 @@ package com.wf.gemrender.spike;
 
 import org.jetbrains.annotations.Nullable;
 
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.asset.GemRenderModels;
 import com.wf.gemrender.asset.ModelCache;
@@ -14,32 +15,32 @@ import java.util.Map;
 import net.minecraft.resources.ResourceLocation;
 
 public final class SpikeAssets {
-	public static final ResourceLocation RADAR = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation RADAR = Ids.of(
 			GemRender.MOD_ID, "models/radar/radar.gltf");
 
-	public static final ResourceLocation RIG = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation RIG = Ids.of(
 			GemRender.MOD_ID, "models/rig/rig.glb");
 
-	public static final ResourceLocation MORPH = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation MORPH = Ids.of(
 			GemRender.MOD_ID, "models/morph/morph.glb");
 
-	public static final ResourceLocation GLASS = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation GLASS = Ids.of(
 			GemRender.MOD_ID, "models/glass/glass.glb");
 
-	public static final ResourceLocation PBR = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation PBR = Ids.of(
 			GemRender.MOD_ID, "models/pbr/pbr.glb");
 
-	public static final ResourceLocation PYLON = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation PYLON = Ids.of(
 			GemRender.MOD_ID, "models/pylon/pylon.geo.json");
 
-	public static final ResourceLocation PYLON_GLTF = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation PYLON_GLTF = Ids.of(
 			GemRender.MOD_ID, "models/pylon/pylon.gltf");
 
-	public static final ResourceLocation RADAR_SKINS = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation RADAR_SKINS = Ids.of(
 			GemRender.MOD_ID, "variants/radar");
 
 	private static ResourceLocation skin(String name) {
-		return ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, "textures/models/" + name + ".png");
+		return Ids.of(GemRender.MOD_ID, "textures/models/" + name + ".png");
 	}
 
 	private static Map<ResourceLocation, ResourceLocation> allOf(String name) {
@@ -51,16 +52,16 @@ public final class SpikeAssets {
 			GemRenderModels.variants(RADAR_SKINS, RADAR,
 					List.of(Map.of(), allOf("radar_bottom"), allOf("radar_top")));
 
-	public static final ResourceLocation PYLON_SKINS = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation PYLON_SKINS = Ids.of(
 			GemRender.MOD_ID, "variants/pylon");
 
 	private static final ModelCache.Handle<GemRenderGltfModel> PYLON_VARIANTS =
 			GemRenderModels.skins(PYLON_SKINS, PYLON, List.of(
-					ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, "models/pylon/pylon.png"),
+					Ids.of(GemRender.MOD_ID, "models/pylon/pylon.png"),
 					skin("pbr_plate"), skin("pbr_lamp")));
 
 	public static ResourceLocation vehicle(String name) {
-		return ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID,
+		return Ids.of(GemRender.MOD_ID,
 				"models/vehicles/" + name + "/" + name + ".geo.json");
 	}
 

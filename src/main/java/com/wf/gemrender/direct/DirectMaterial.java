@@ -1,5 +1,7 @@
 package com.wf.gemrender.direct;
 
+import com.wf.gemrender.Ids;
+
 import com.wf.gemrender.GemRender;
 import dev.engine_room.flywheel.api.material.Material;
 import dev.engine_room.flywheel.api.material.Transparency;
@@ -9,7 +11,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Nullable;
 
 public record DirectMaterial(ResourceLocation texture, Mode mode, float alphaCutoff, boolean doubleSided) {
-    public static final ResourceLocation WHITE = ResourceLocation.withDefaultNamespace("textures/misc/white.png");
+    public static final ResourceLocation WHITE = Ids.vanilla("textures/misc/white.png");
 
     @Nullable
     public static DirectMaterial of(Material material) {

@@ -1,6 +1,7 @@
 package com.wf.gemrender.water;
 
 import com.wf.gemrender.GemRender;
+import com.wf.gemrender.render.LevelStage;
 
 //? if neoforge {
 import net.neoforged.api.distmarker.Dist;
@@ -21,37 +22,50 @@ public final class WaterSplitEvents {
     }
 
     //? if >=26.1 {
-	/*@SubscribeEvent(priority = EventPriority.HIGH)
+	/*@SubscribeEvent(priority = EventPriority.LOW)
 	public static void onAfterEntities(RenderLevelStageEvent.AfterOpaqueFeatures event) {
 		WaterSplit.getInstance()
-				.onAfterEntities(event);
+				.onAfterEntities(new LevelStage(event.getLevelRenderState().chunkSectionsToRender));
 	}
 
 	@SubscribeEvent
 	public static void onAfterTranslucent(RenderLevelStageEvent.AfterTranslucentBlocks event) {
 		WaterSplit.getInstance()
-				.onAfterTranslucent(event);
+				.onAfterTranslucent();
 	}
 
 	@SubscribeEvent
 	public static void onAfterWeather(RenderLevelStageEvent.AfterWeather event) {
 		WaterSplit.getInstance()
-				.onAfterWeather(event);
+				.onAfterWeather();
 	}
 *///?} else {
     @SubscribeEvent
     public static void onRenderStage(RenderLevelStageEvent event) {
         if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
             WaterSplit.getInstance()
-                    .onAfterEntities(event);
+                    .onAfterEntities(stageOf(event));
         } else if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
             WaterSplit.getInstance()
-                    .onAfterTranslucent(event);
+                    .onAfterTranslucent();
         } else if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_WEATHER) {
-
             WaterSplit.getInstance()
-                    .onAfterWeather(event);
+                    .onAfterWeather();
         }
     }
     //?}
+
+    //? if >=1.21 <26.1 {
+    private static LevelStage stageOf(RenderLevelStageEvent event) {
+        return new LevelStage(event.getLevelRenderer(), event.getCamera(), event.getFrustum(),
+                event.getPoseStack(), event.getModelViewMatrix(), event.getProjectionMatrix());
+    }
+    //?}
+
+    //? if <1.21 {
+	/*private static LevelStage stageOf(RenderLevelStageEvent event) {
+		return new LevelStage(event.getLevelRenderer(), event.getCamera(), event.getFrustum(),
+				event.getPoseStack(), null, event.getProjectionMatrix());
+	}
+*///?}
 }

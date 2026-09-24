@@ -1,5 +1,7 @@
 package com.wf.gemrender.particle;
 
+import com.wf.gemrender.Ids;
+
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.water.Absorbance;
 import dev.engine_room.flywheel.api.material.*;
@@ -14,8 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class ParticleModels {
     public static final MaterialShaders ABSORBANCE_SHADERS = new SimpleMaterialShaders(
-            ResourceLocation.fromNamespaceAndPath("flywheel", "material/default.vert"),
-            ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, "material/absorbance.frag"));
+            Ids.of("flywheel", "material/default.vert"),
+            Ids.of(GemRender.MOD_ID, "material/absorbance.frag"));
 
     private static final Map<Key, Model> BILLBOARDS = new ConcurrentHashMap<>();
 

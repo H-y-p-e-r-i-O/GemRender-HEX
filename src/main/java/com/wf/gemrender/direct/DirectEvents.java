@@ -55,10 +55,7 @@ public final class DirectEvents {
             return;
         }
 
-        ResidentModels.freeAll();
-        DirectRenderer.freeAll();
-        DirectProgram.getInstance()
-                .delete();
+        DirectReload.run();
     }
 
     //? if >=26.1 {

@@ -4,6 +4,7 @@ import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.render.BoneBuffer;
 import com.wf.gemrender.render.GemRenderInstance;
 import com.wf.gemrender.render.GemRenderInstanceTypes;
@@ -26,7 +27,7 @@ import net.minecraft.world.level.Level;
 
 public final class SpikeVisual extends AbstractVisual implements EffectVisual<SpikeEffect>, SimpleDynamicVisual {
 	private static final Model MODEL = new SingleMeshModel(SkinnedCubeMesh.INSTANCE, SimpleMaterial.builder()
-			.texture(ResourceLocation.withDefaultNamespace("textures/misc/white.png"))
+			.texture(Ids.vanilla("textures/misc/white.png"))
 			.mipmap(false)
 			.build());
 

@@ -2,13 +2,6 @@ package com.wf.gemrender.iris;
 
 import com.wf.gemrender.GemRender;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
-
-@EventBusSubscriber(modid = GemRender.MOD_ID, value = Dist.CLIENT)
 public final class IrisPbrBridge {
     private static final boolean ENABLED =
             !"false".equalsIgnoreCase(System.getProperty("gemrender.irispbr", "true"));
@@ -18,15 +11,13 @@ public final class IrisPbrBridge {
     private IrisPbrBridge() {
     }
 
-    @SubscribeEvent
-    public static void onClientTick(ClientTickEvent.Post event) {
+    public static void install(boolean irisLoaded) {
         if (installed) {
             return;
         }
         installed = true;
 
-        if (!ENABLED || !ModList.get()
-                .isLoaded("iris")) {
+        if (!ENABLED || !irisLoaded) {
             return;
         }
 

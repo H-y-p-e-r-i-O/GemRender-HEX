@@ -5,8 +5,13 @@ import com.wf.gemrender.GemRender;
 import com.wf.gemrender.texture.AtlasTexture;
 import com.wf.gemrender.texture.LabPbr;
 import com.wf.gemrender.texture.SurfaceBake;
+//? if >=1.21 {
 import net.irisshaders.iris.pbr.loader.PBRTextureLoader;
 import net.irisshaders.iris.pbr.loader.PBRTextureLoaderRegistry;
+//?} else {
+/*import net.irisshaders.iris.texture.pbr.loader.PBRTextureLoader;
+import net.irisshaders.iris.texture.pbr.loader.PBRTextureLoaderRegistry;
+*///?}
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.server.packs.resources.ResourceManager;

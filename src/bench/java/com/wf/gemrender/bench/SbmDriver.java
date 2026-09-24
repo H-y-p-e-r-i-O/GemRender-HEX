@@ -20,6 +20,7 @@ import com.maydaymemory.mae.blend.AdditiveBlender;
 import com.maydaymemory.mae.blend.SimpleAdditiveBlender;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.spike.SpikeAssets;
 
@@ -31,7 +32,7 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.ResourceLocation;
 
 public final class SbmDriver implements BenchDriver {
-	private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath(
+	private static final ResourceLocation TEXTURE = Ids.of(
 			GemRender.MOD_ID, "models/pylon/pylon.png");
 
 	private static final RenderType RENDER_TYPE = RenderType.entityCutoutNoCull(TEXTURE);
@@ -89,7 +90,7 @@ public final class SbmDriver implements BenchDriver {
 
 	private static ResourceLocation sibling(ResourceLocation location, String suffix) {
 		String path = location.getPath();
-		return ResourceLocation.fromNamespaceAndPath(location.getNamespace(),
+		return Ids.of(location.getNamespace(),
 				path.substring(0, path.length() - ".geo.json".length()) + suffix);
 	}
 

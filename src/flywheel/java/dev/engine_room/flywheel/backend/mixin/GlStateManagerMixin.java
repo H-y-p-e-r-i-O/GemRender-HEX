@@ -8,6 +8,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import com.mojang.blaze3d.platform.GlStateManager;
 
 import dev.engine_room.flywheel.backend.gl.GlStateTracker;
+import dev.engine_room.flywheel.backend.gl.VanillaProgramCache;
 import dev.engine_room.flywheel.backend.gl.buffer.GlBufferType;
 
 /**
@@ -34,5 +35,6 @@ abstract class GlStateManagerMixin {
 	@Inject(method = "_glUseProgram(I)V", at = @At("RETURN"))
 	private static void flywheel$onUseProgram(int program, CallbackInfo ci) {
 		GlStateTracker._setProgram(program);
+		VanillaProgramCache.invalidate();
 	}
 }

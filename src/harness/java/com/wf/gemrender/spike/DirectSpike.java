@@ -35,7 +35,7 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderHandEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-//?} else {
+//?} else if forge {
 /*import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -44,8 +44,21 @@ import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 *///?}
+//? if fabric {
+/*import com.wf.gemrender.Ids;
+import com.wf.gemrender.fabric.HandRenderEvents;
 
+import net.fabricmc.fabric.api.event.Event;
+import net.fabricmc.fabric.api.client.rendering.v1.BuiltinItemRendererRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.Item;
+*///?}
+
+//? if !fabric {
 @EventBusSubscriber(modid = GemRender.MOD_ID, value = Dist.CLIENT)
+//?}
 public final class DirectSpike {
 	private static final int COUNT = Integer.getInteger("gemrender.autodirect", 0);
 
@@ -250,51 +263,63 @@ public final class DirectSpike {
 				.w());
 	}
 
-	@SubscribeEvent
-	public static void onRenderHand(RenderHandEvent event) {
-		if (!HAND || COUNT <= 0 || model() == null || event.getHand() != InteractionHand.MAIN_HAND) {
+	private static void handCopies(PoseStack pose, MultiBufferSource buffers, int light) {
+		if (!HAND || COUNT <= 0 || model() == null) {
 			return;
 		}
 
-		PoseStack pose = event.getPoseStack();
 		ItemStack stack = new ItemStack(Items.STONE);
 
 		for (int i = 0; i < COUNT; i++) {
 			copy = i;
 			pose.pushPose();
 			pose.translate(-0.4f + i * 0.4f, -0.3f, -2.0f);
-
-			//? if >=26.1 {
-			/*draw(stack, ItemDisplayContext.FIRST_PERSON_RIGHT_HAND, pose, null,
-					event.getPackedLight());
-*///?} else {
-			draw(stack, ItemDisplayContext.FIRST_PERSON_RIGHT_HAND, pose,
-					event.getMultiBufferSource(), event.getPackedLight());
-			//?}
-
+			draw(stack, ItemDisplayContext.FIRST_PERSON_RIGHT_HAND, pose, buffers, light);
 			pose.popPose();
 		}
 	}
 
 	//? if >=26.1 {
 	/*@SubscribeEvent
+	public static void onRenderHand(RenderHandEvent event) {
+		if (event.getHand() != InteractionHand.MAIN_HAND) {
+			return;
+		}
+		handCopies(event.getPoseStack(), null, event.getPackedLight());
+	}
+*///?} else if !fabric {
+	@SubscribeEvent
+	public static void onRenderHand(RenderHandEvent event) {
+		if (event.getHand() != InteractionHand.MAIN_HAND) {
+			return;
+		}
+		handCopies(event.getPoseStack(), event.getMultiBufferSource(), event.getPackedLight());
+	}
+	//?}
+
+	//? if >=26.1 {
+	/*@SubscribeEvent
 	public static void onRenderGui(RenderGuiEvent.Post event) {
 		itemGrid(event.getGuiGraphics());
 	}
-*///?} else {
-
+*///?} else if !fabric {
 	@SubscribeEvent
 	public static void onRenderGui(RenderGuiEvent.Post event) {
+		gui(event.getGuiGraphics());
+	}
+	//?}
+
+	//? if <26.1 {
+	public static void gui(net.minecraft.client.gui.GuiGraphics graphics) {
 		if (COUNT <= 0 || model() == null) {
 			return;
 		}
 
 		if (ITEM_GRID) {
-			itemGrid(event.getGuiGraphics());
+			itemGrid(graphics);
 			return;
 		}
 
-		var graphics = event.getGuiGraphics();
 		PoseStack pose = graphics.pose();
 
 		if (ARMOR) {
@@ -370,11 +395,11 @@ public final class DirectSpike {
 	//?}
 
 	private static void itemGrid(Object graphics) {
-		if (COUNT <= 0 || model() == null || SpikeItems.item() == null) {
+		ItemStack stack = spikeStack();
+		if (COUNT <= 0 || model() == null || stack == null) {
 			return;
 		}
 
-		ItemStack stack = new ItemStack(SpikeItems.item());
 		int stride = Math.max(1, (int) Math.ceil(Math.sqrt(COUNT)));
 		for (int i = 0; i < COUNT; i++) {
 			copy = i;
@@ -391,7 +416,7 @@ public final class DirectSpike {
 	public static void onRenderStage(RenderLevelStageEvent.AfterOpaqueFeatures event) {
 		levelCopies(event.getPoseStack());
 	}
-*///?} else {
+*///?} else if !fabric {
 	@SubscribeEvent(priority = EventPriority.HIGH)
 	public static void onRenderStage(RenderLevelStageEvent event) {
 		if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
@@ -403,7 +428,8 @@ public final class DirectSpike {
 
 	private static void totemPop() {
 		Minecraft mc = Minecraft.getInstance();
-		if (!TOTEM || mc.level == null || SpikeItems.item() == null || model() == null) {
+		ItemStack totem = spikeStack();
+		if (!TOTEM || mc.level == null || totem == null || model() == null) {
 			return;
 		}
 
@@ -412,7 +438,7 @@ public final class DirectSpike {
 			return;
 		}
 		totemArmedAt = now;
-		mc.gameRenderer.displayItemActivation(new ItemStack(SpikeItems.item()));
+		mc.gameRenderer.displayItemActivation(totem);
 	}
 
 	private static void levelCopies(PoseStack pose) {
@@ -451,6 +477,27 @@ public final class DirectSpike {
 
 			pose.popPose();
 		}
+	}
+
+	//? if fabric {
+	/*public static void init() {
+		WorldRenderEvents.AFTER_ENTITIES.addPhaseOrdering(EARLY, Event.DEFAULT_PHASE);
+		WorldRenderEvents.AFTER_ENTITIES.register(EARLY, context -> levelCopies(context.matrixStack()));
+		HandRenderEvents.BEFORE_HAND.register(
+				(pose, buffers, light, partialTick) -> handCopies(pose, buffers, light));
+
+		Item item = Registry.register(BuiltInRegistries.ITEM, SpikeItems.SPIKE, SpikeItems.create());
+		BuiltinItemRendererRegistry.INSTANCE.register(item,
+				(stack, context, pose, buffers, light, overlay) -> renderer()
+						.renderByItem(stack, context, pose, buffers, light, overlay));
+	}
+
+	private static final net.minecraft.resources.ResourceLocation EARLY =
+			Ids.of(GemRender.MOD_ID, "direct_spike");
+	*///?}
+
+	private static ItemStack spikeStack() {
+		return SpikeItems.item() == null ? null : new ItemStack(SpikeItems.item());
 	}
 
 	public static String verdict() {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
@@ -109,10 +110,17 @@ class ParticleSweepScaleTest {
 			Vec3 from = new Vec3(fx, fy, fz);
 			Vec3 to = new Vec3(tx, ty, tz);
 
-			// 1.20.1's ClipContext takes the Entity itself; 1.21 onwards takes its CollisionContext.
 			//? if <1.21 {
-			/*BlockHitResult hit = level.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
-					ClipContext.Fluid.NONE, (net.minecraft.world.entity.Entity) null));
+			/*BlockHitResult hit = BlockGetter.traverseBlocks(from, to, CollisionContext.empty(),
+					(context, pos) -> {
+						BlockState state = level.getBlockState(pos);
+						return level.clipWithInteractionOverride(from, to, pos,
+								state.getCollisionShape(level, pos, context), state);
+					}, context -> {
+						Vec3 delta = from.subtract(to);
+						return BlockHitResult.miss(to, Direction.getNearest(delta.x, delta.y, delta.z),
+								BlockPos.containing(to));
+					});
 			*///?} else {
 			BlockHitResult hit = level.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER,
 					ClipContext.Fluid.NONE, CollisionContext.empty()));

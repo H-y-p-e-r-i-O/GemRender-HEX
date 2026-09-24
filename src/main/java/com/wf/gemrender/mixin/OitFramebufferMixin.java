@@ -2,7 +2,9 @@ package com.wf.gemrender.mixin;
 
 import com.wf.gemrender.volume.Volumetrics;
 import com.wf.gemrender.water.Absorbance;
+//? if water {
 import com.wf.gemrender.water.WaterSplit;
+//?}
 import dev.engine_room.flywheel.backend.engine.indirect.OitFramebuffer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -50,9 +52,11 @@ abstract class OitFramebufferMixin {
         Absorbance.getInstance()
                 .endFrame();
 
+        //? if water {
         if (WaterSplit.getInstance()
                 .compositeInstead((OitFramebuffer) (Object) this)) {
             ci.cancel();
         }
+        //?}
     }
 }

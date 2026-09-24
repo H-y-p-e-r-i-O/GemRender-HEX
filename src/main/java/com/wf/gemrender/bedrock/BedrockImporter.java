@@ -1,5 +1,7 @@
 package com.wf.gemrender.bedrock;
 
+import com.wf.gemrender.Ids;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.wf.gemrender.GemRender;
@@ -342,7 +344,7 @@ public final class BedrockImporter {
     }
 
     private static ResourceLocation atlasId(ResourceLocation id) {
-        return ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID,
+        return Ids.of(GemRender.MOD_ID,
                 "atlas/" + id.getNamespace() + "/" + id.getPath());
     }
 
@@ -363,7 +365,7 @@ public final class BedrockImporter {
         }
 
         if (geometry.texture() != null) {
-            return ResourceLocation.parse(geometry.texture());
+            return Ids.parse(geometry.texture());
         }
 
         ResourceLocation sibling = sibling(location, ".png");
@@ -423,7 +425,7 @@ public final class BedrockImporter {
         } else if (path.endsWith(".json")) {
             path = path.substring(0, path.length() - ".json".length());
         }
-        return ResourceLocation.fromNamespaceAndPath(location.getNamespace(), path + suffix);
+        return Ids.of(location.getNamespace(), path + suffix);
     }
 
     private static JsonObject read(ResourceLocation location) throws IOException {

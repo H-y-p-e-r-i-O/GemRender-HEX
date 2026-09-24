@@ -1,5 +1,7 @@
 package com.wf.gemrender.volume;
 
+import com.wf.gemrender.Ids;
+
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.particle.ParticleQuad;
 import com.wf.gemrender.water.Absorbance;
@@ -17,11 +19,11 @@ import net.minecraft.resources.ResourceLocation;
 
 public final class VolumeModels {
     public static final MaterialShaders VOLUME_SHADERS = new SimpleMaterialShaders(
-            ResourceLocation.fromNamespaceAndPath("flywheel", "material/default.vert"),
-            ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, "material/volume.frag"));
+            Ids.of("flywheel", "material/default.vert"),
+            Ids.of(GemRender.MOD_ID, "material/volume.frag"));
 
     private static final ResourceLocation WHITE =
-            ResourceLocation.withDefaultNamespace("textures/misc/white.png");
+            Ids.vanilla("textures/misc/white.png");
 
     private static final Object LOCK = new Object();
 

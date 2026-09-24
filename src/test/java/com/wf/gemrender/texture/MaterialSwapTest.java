@@ -7,11 +7,13 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.wf.gemrender.Ids;
+
 import net.minecraft.resources.ResourceLocation;
 
 class MaterialSwapTest {
 	private static ResourceLocation at(String path) {
-		return ResourceLocation.fromNamespaceAndPath("gemrender", path);
+		return Ids.of("gemrender", path);
 	}
 
 	private static final ResourceLocation BASE = at("textures/base.png");

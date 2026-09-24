@@ -6,7 +6,9 @@
   "refmap": "backend-flywheel.refmap.json",
   "client": [
     "AbstractClientPlayerAccessor",
+    "GlCommandEncoderMixin",
     "GlStateManagerMixin",
+    "GpuDeviceAccessor",
     "LevelRendererAccessor",
     "OptionsMixin",
     "RenderSystemMixin",

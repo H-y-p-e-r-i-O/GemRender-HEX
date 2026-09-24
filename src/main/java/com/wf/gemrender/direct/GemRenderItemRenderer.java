@@ -1,5 +1,7 @@
 package com.wf.gemrender.direct;
 
+import com.wf.gemrender.Ids;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.gltf.GemRenderGltfModel;
@@ -184,7 +186,7 @@ public class GemRenderItemRenderer extends BlockEntityWithoutLevelRenderer {
     //? if >=26.1 {
 	/*// The id the item model JSON names this renderer's TYPE by. One per mod, not one per model: the
 	// model is chosen by the "key" field inside it, which is what REGISTRY is keyed on.
-	public static final ResourceLocation TYPE_ID = ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID,
+	public static final ResourceLocation TYPE_ID = Ids.of(GemRender.MOD_ID,
 			"model");
 
 	// The stack itself is the argument. SpecialModelRenderer#submit is handed only this, so anything

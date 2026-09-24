@@ -6,6 +6,10 @@ plugins {
 
     id 'net.neoforged.moddev' version '2.0.146' apply false
     id 'net.neoforged.moddev.legacyforge' version '2.0.146' apply false
+    // Fabric Loom, applied by build.fabric.gradle on a node whose loader is 'fabric'. The
+    // back-compat wrapper picks the right Loom variant per era: below 26.1 Minecraft is obfuscated
+    // and mod dependencies have to be remapped, at 26.1 and above they already read in Mojang names.
+    id 'dev.kikugie.loom-back-compat' version '0.4.2' apply false
 }
 
 version = mod_version
@@ -16,9 +20,19 @@ base {
 }
 
 def mcVersion = stonecutter.current.version
+
+// Fabric is built by Loom, whose DSL has nothing in common with ModDevGradle's -- no `mods {}`, no
+// `runs {}`, no `addModdingDependenciesTo`. Rather than thread a third branch through every one of
+// those blocks, a Fabric node hands off to its own script and this one returns untouched, so the
+// Forge and NeoForge builds are byte-identical to what they were before Fabric existed.
+if (loader == 'fabric') {
+    apply from: "${rootProject.projectDir}/build.fabric.gradle"
+    return
+}
+
 def isLegacy = loader == 'forge'
 if (loader != 'forge' && loader != 'neoforge') {
-    throw new GradleException("versions/${mcVersion}/gradle.properties: loader='${loader}', expected 'forge' or 'neoforge'")
+    throw new GradleException("versions/${mcVersion}/gradle.properties: loader='${loader}', expected 'forge', 'neoforge' or 'fabric'")
 }
 apply plugin: isLegacy ? 'net.neoforged.moddev.legacyforge' : 'net.neoforged.moddev'
 
@@ -32,19 +46,30 @@ def runDir = rootProject.file(
 
 def ktxSupported = ktx_supported.toBoolean()
 def irisSupported = iris_supported.toBoolean()
+
+// Iris and Sodium ship under different names on Forge: Oculus is the Iris port and Embeddium the
+// Sodium one, same classes and same package names underneath. Only a node that needs the other pair
+// sets these.
+def sodiumProject = project.findProperty('sodium_project') ?: 'sodium'
+def irisProject = project.findProperty('iris_project') ?: 'iris'
 def harnessSupported = harness_supported.toBoolean()
 def benchSupported = bench_supported.toBoolean()
 
 def flywheelVendored = flywheel_vendored.toBoolean()
 
+def waterSupported = water_supported.toBoolean()
+
 def directSupported = direct_supported.toBoolean()
 def directMixinSet = stonecutter.eval(mcVersion, '>=26.1') ? 'direct26' : 'direct'
+def renderDocCompat = stonecutter.eval(mcVersion, '>=26.1')
 def directMixinConfig = "gemrender.${directMixinSet}.mixins.json"
 
-stonecutter.constants.match(loader, 'forge', 'neoforge')
+stonecutter.constants.match(loader, 'forge', 'neoforge', 'fabric')
 
 stonecutter.constants.put('ktx', ktxSupported)
 stonecutter.constants.put('iris', irisSupported)
+stonecutter.constants.put('water', waterSupported)
+stonecutter.constants.put('direct', directSupported)
 
 stonecutter.replacements.string(stonecutter.eval(mcVersion, '>=26.1')) {
     replace('ResourceLocation', 'Identifier')
@@ -88,9 +113,16 @@ repositories {
 
 def benchEnabled = project.hasProperty('bench') || project.hasProperty('rival')
 if (benchEnabled && !bench_supported.toBoolean()) {
-    throw new GradleException("-Pbench/-Prival: the cross-framework benchmark is not ported to "
-            + "Minecraft ${stonecutter.current.version}. Run it on a version whose "
-            + "bench_supported is true, or see gemrender-internal/docs/MULTIVERSION.md.")
+    // Thrown when this node's client starts, NOT while it is configured. A -P flag reaches every
+    // subproject Gradle configures, not only the one being run, so throwing here refused `-Pbench`
+    // on 1.21.1 -- the one node that supports it -- because configuring 1.20.1 threw first.
+    tasks.matching { it.name.startsWith('runClient') }.configureEach {
+        doFirst {
+            throw new GradleException("-Pbench/-Prival: the cross-framework benchmark is not ported "
+                    + "to Minecraft ${stonecutter.current.version}. Run it on a version whose "
+                    + "bench_supported is true, or see gemrender-internal/docs/MULTIVERSION.md.")
+        }
+    }
 }
 def rivalName = project.hasProperty('rival') ? project.property('rival').toString() : null
 
@@ -122,6 +154,10 @@ if (isLegacy) {
 } else {
     neoForge.version = project.neo_version
 }
+
+ext.harnessRunDir = runDir
+ext.harnessRenderDocCompat = renderDocCompat
+apply from: "${rootProject.projectDir}/gradle/harness-run.gradle"
 
 modding.with {
 
@@ -168,395 +204,14 @@ modding.with {
     runs {
         client {
             client()
-            systemProperty gametest_namespaces_property, project.mod_id
 
-            if (project.hasProperty('quickPlay')) {
-                programArguments.addAll '--quickPlaySingleplayer', project.property('quickPlay').toString()
+            harnessSystemProperties.each { name, value -> systemProperty name, value }
+            harnessEnvironment.each { name, value -> environment name, value }
+            if (!harnessProgramArgs.isEmpty()) {
+                programArguments.addAll harnessProgramArgs
             }
-
-            if (project.hasProperty('benchCount')) {
-                systemProperty 'gemrender.bench.count', project.property('benchCount').toString()
-            }
-            if (project.hasProperty('benchExit')) {
-                systemProperty 'gemrender.bench.exit', project.property('benchExit').toString()
-            }
-
-            if (project.hasProperty('benchFrame')) {
-                systemProperty 'gemrender.bench.frame', project.property('benchFrame').toString()
-            }
-            if (rivalName != null) {
-                systemProperty 'gemrender.bench.rival', rivalName
-            }
-
-            if (project.hasProperty('benchAsset')) {
-                systemProperty 'gemrender.bench.asset', project.property('benchAsset').toString()
-            }
-
-            if (project.hasProperty('spacing')) {
-                systemProperty 'gemrender.spacing', project.property('spacing').toString()
-            }
-
-            if (project.hasProperty('direct')) {
-                systemProperty 'gemrender.autodirect', project.property('direct').toString()
-            }
-            if (project.hasProperty('directasset')) {
-                systemProperty 'gemrender.directasset', project.property('directasset').toString()
-            }
-
-            if (project.hasProperty('directstats')) {
-                systemProperty 'gemrender.directstats', 'true'
-            }
-            if (project.hasProperty('directspread')) {
-                systemProperty 'gemrender.directspread', 'true'
-            }
-
-            if (project.hasProperty('directitem')) {
-                systemProperty 'gemrender.directitem', 'true'
-            }
-
-            if (project.hasProperty('directflushper')) {
-                systemProperty 'gemrender.directflushper', 'true'
-            }
-
-            if (project.hasProperty('directdecorate')) {
-                systemProperty 'gemrender.directdecorate', 'true'
-            }
-
-            if (project.hasProperty('directarmor')) {
-                systemProperty 'gemrender.directarmor', 'true'
-            }
-
-            if (project.hasProperty('directhand')) {
-                systemProperty 'gemrender.directhand', 'true'
-            }
-
-            if (project.hasProperty('directtotem')) {
-                systemProperty 'gemrender.directtotem', 'true'
-            }
-
-            if (project.hasProperty('skipVanillaRender')) {
-                systemProperty 'gemrender.skipvanillarender',
-                        project.property('skipVanillaRender').toString()
-            }
-
-            if (project.hasProperty('standVisible')) {
-                systemProperty 'gemrender.standvisible', 'true'
-            }
-
-            if (project.hasProperty('directinterleave')) {
-                systemProperty 'gemrender.directinterleave', 'true'
-            }
-
-            if (project.hasProperty('spike')) {
-                systemProperty 'gemrender.autospike', project.property('spike').toString()
-            }
-
-            if (project.hasProperty('particles')) {
-                systemProperty 'gemrender.autoparticles', project.property('particles').toString()
-            }
-
-            if (project.hasProperty('particleEmitters')) {
-                systemProperty 'gemrender.particleemitters', project.property('particleEmitters').toString()
-            }
-
-            if (project.hasProperty('particleSpacing')) {
-                systemProperty 'gemrender.particlespacing', project.property('particleSpacing').toString()
-            }
-
-            if (project.hasProperty('particleTint')) {
-                systemProperty 'gemrender.particletint', project.property('particleTint').toString()
-            }
-            if (project.hasProperty('particleLight')) {
-                systemProperty 'gemrender.particlelight', project.property('particleLight').toString()
-            }
-            if (project.hasProperty('particleCool')) {
-                systemProperty 'gemrender.particlecool', project.property('particleCool').toString()
-            }
-            if (project.hasProperty('particlePlacement')) {
-                systemProperty 'gemrender.particleplacement', project.property('particlePlacement').toString()
-            }
-
-            if (project.hasProperty('particleBlend')) {
-                systemProperty 'gemrender.particleblend', project.property('particleBlend').toString()
-            }
-
-            if (project.hasProperty('particleSize')) {
-                systemProperty 'gemrender.particlesize', project.property('particleSize').toString()
-            }
-
-            if (project.hasProperty('volume')) {
-                systemProperty 'gemrender.autovolumes', project.property('volume').toString()
-            }
-
-            if (project.hasProperty('volumeQuality')) {
-                systemProperty 'gemrender.volumequality', project.property('volumeQuality').toString()
-            }
-
-            if (project.hasProperty('volumeSize')) {
-                systemProperty 'gemrender.volumesize', project.property('volumeSize').toString()
-            }
-            if (project.hasProperty('volumeDensity')) {
-                systemProperty 'gemrender.volumedensity', project.property('volumeDensity').toString()
-            }
-            if (project.hasProperty('volumeTint')) {
-                systemProperty 'gemrender.volumetint', project.property('volumeTint').toString()
-            }
-
-            if (project.hasProperty('volumeCells')) {
-                systemProperty 'gemrender.volumecells', project.property('volumeCells').toString()
-            }
-            if (project.hasProperty('volumeSpacing')) {
-                systemProperty 'gemrender.volumespacing', project.property('volumeSpacing').toString()
-            }
-
-            ['volumePhase' : 'gemrender.volumephase',
-             'volumeAmbient': 'gemrender.volumeambient',
-             'volumeSun'   : 'gemrender.volumesun',
-             'volumeEdge'  : 'gemrender.volumeedge',
-             'volumeDetail': 'gemrender.volumedetail'].each { gradleName, systemName ->
-                if (project.hasProperty(gradleName)) {
-                    systemProperty systemName, project.property(gradleName).toString()
-                }
-            }
-
-            if (project.hasProperty('volumetrics')) {
-                systemProperty 'gemrender.volumetrics', project.property('volumetrics').toString()
-            }
-
-            if (project.hasProperty('ropes')) {
-                systemProperty 'gemrender.autoropes', project.property('ropes').toString()
-            }
-
-            ['ropeRadius': 'roperadius', 'ropeSpan': 'ropespan', 'ropeSides': 'ropesides',
-             'ropeRings': 'roperings', 'ropeSway': 'ropesway'].each { flag, prop ->
-                if (project.hasProperty(flag)) {
-                    systemProperty "gemrender.${prop}", project.property(flag).toString()
-                }
-            }
-
-            if (project.hasProperty('radar')) {
-                systemProperty 'gemrender.autoradar', project.property('radar').toString()
-            }
-
-            if (project.hasProperty('entity')) {
-                systemProperty 'gemrender.autoentity', 'true'
-            }
-
-            if (project.hasProperty('variants')) {
-                systemProperty 'gemrender.autovariants', 'true'
-            }
-
-            if (project.hasProperty('variantIndex')) {
-                systemProperty 'gemrender.autovariantindex', project.property('variantIndex').toString()
-            }
-
-            if (project.hasProperty('pylon')) {
-                systemProperty 'gemrender.autopylon', project.property('pylon').toString()
-            }
-
-            if (project.hasProperty('pylonGltf')) {
-                systemProperty 'gemrender.autopylongltf', project.property('pylonGltf').toString()
-            }
-
-            if (project.hasProperty('veh')) {
-                systemProperty 'gemrender.autovehicle', project.property('veh').toString()
-            }
-            if (project.hasProperty('vehParts')) {
-                systemProperty 'gemrender.autovehicleparts', project.property('vehParts').toString()
-            }
-            if (project.hasProperty('vehicle')) {
-                systemProperty 'gemrender.autovehiclename', project.property('vehicle').toString()
-            }
-
-            if (project.hasProperty('spinBone')) {
-                systemProperty 'gemrender.autospinbone', project.property('spinBone').toString()
-            }
-
-            if (project.hasProperty('spinDuty')) {
-                systemProperty 'gemrender.autospinduty', project.property('spinDuty').toString()
-            }
-
-            if (project.hasProperty('label')) {
-                systemProperty 'gemrender.autolabel', project.property('label').toString()
-            }
-            if (project.hasProperty('row')) {
-                systemProperty 'gemrender.autorow', project.property('row').toString()
-            }
-            if (project.hasProperty('gameplayBones')) {
-                systemProperty 'gemrender.gameplaybones', project.property('gameplayBones').toString()
-            }
-
-            if (project.hasProperty('water')) {
-                systemProperty 'gemrender.autowater', project.property('water').toString()
-            }
-
-            if (project.hasProperty('waterColumn')) {
-                systemProperty 'gemrender.autowatercolumn', project.property('waterColumn').toString()
-            }
-
-            if (project.hasProperty('waterBlock')) {
-                systemProperty 'gemrender.waterblock', project.property('waterBlock').toString()
-            }
-
-            if (project.hasProperty('controls')) {
-                systemProperty 'gemrender.autocontrols', project.property('controls').toString()
-            }
-
-            if (project.hasProperty('graphics')) {
-                systemProperty 'gemrender.autographics', project.property('graphics').toString()
-            }
-
-            if (project.hasProperty('rig')) {
-                systemProperty 'gemrender.autorig', project.property('rig').toString()
-            }
-
-            if (project.hasProperty('morph')) {
-                systemProperty 'gemrender.automorph', project.property('morph').toString()
-            }
-
-            if (project.hasProperty('glass')) {
-                systemProperty 'gemrender.autoglass', project.property('glass').toString()
-            }
-
-            if (project.hasProperty('pbr')) {
-                systemProperty 'gemrender.autopbr', project.property('pbr').toString()
-            }
-
-            if (project.hasProperty('oit')) {
-                systemProperty 'gemrender.oit', project.property('oit').toString()
-            }
-
-            if (project.hasProperty('waterSplit')) {
-                systemProperty 'gemrender.watersplit', project.property('waterSplit').toString()
-            }
-
-            if (project.hasProperty('cloudSplit')) {
-                systemProperty 'gemrender.cloudsplit', project.property('cloudSplit').toString()
-            }
-
-            if (project.hasProperty('clouds')) {
-                systemProperty 'gemrender.clouds', project.property('clouds').toString()
-            }
-
-            if (project.hasProperty('absorbance')) {
-                systemProperty 'gemrender.absorbance', project.property('absorbance').toString()
-            }
-
-            if (project.hasProperty('atlas')) {
-                systemProperty 'gemrender.atlas', project.property('atlas').toString()
-            }
-            if (project.hasProperty('merge')) {
-                systemProperty 'gemrender.merge', project.property('merge').toString()
-            }
-
-            if (project.hasProperty('glAudit')) {
-                systemProperty 'gemrender.glaudit', project.property('glAudit').toString()
-            }
-
-            if (project.hasProperty('anim')) {
-                systemProperty 'gemrender.autoanimation', project.property('anim').toString()
-            }
-
-            if (project.hasProperty('sync')) {
-                systemProperty 'gemrender.autosync', project.property('sync').toString()
-            }
-
-            if (project.hasProperty('poseQuantum')) {
-                systemProperty 'gemrender.posequantum', project.property('poseQuantum').toString()
-            }
-
-            if (project.hasProperty('phaseSteps')) {
-                systemProperty 'gemrender.phasesteps', project.property('phaseSteps').toString()
-            }
-
-            if (project.hasProperty('poseLod')) {
-                systemProperty 'gemrender.poselod', project.property('poseLod').toString()
-            }
-
-            if (project.hasProperty('poseFreeze')) {
-                systemProperty 'gemrender.posefreeze', project.property('poseFreeze').toString()
-            }
-
-            if (project.hasProperty('yaw')) {
-                systemProperty 'gemrender.autoyaw', project.property('yaw').toString()
-            }
-
-            if (project.hasProperty('pitch')) {
-                systemProperty 'gemrender.autopitch', project.property('pitch').toString()
-            }
-
-            if (project.hasProperty('dumpShaders')) {
-                systemProperty 'flw.dumpShaderSource', 'true'
-            }
-
-            if (project.hasProperty('dumpAtlas')) {
-                systemProperty 'gemrender.dumpatlas', 'true'
-            }
-
-            if (project.hasProperty('irisPbr')) {
-                systemProperty 'gemrender.irispbr', project.property('irisPbr').toString()
-            }
-
-            if (project.hasProperty('blockCache')) {
-                systemProperty 'gemrender.blockcache', project.property('blockCache').toString()
-            }
-
-            if (project.hasProperty('compress')) {
-                systemProperty 'gemrender.compress', project.property('compress').toString()
-            }
-
-            if (project.hasProperty('probeUnits')) {
-                systemProperty 'gemrender.probeunits', project.property('probeUnits').toString()
-            }
-
-            if (project.hasProperty('boneUnit')) {
-                systemProperty 'gemrender.boneunit', project.property('boneUnit').toString()
-            }
-            if (project.hasProperty('morphUnit')) {
-                systemProperty 'gemrender.morphunit', project.property('morphUnit').toString()
-            }
-            if (project.hasProperty('spikeExit')) {
-                systemProperty 'gemrender.autoexit', project.property('spikeExit').toString()
-            }
-
-            if (project.hasProperty('freeze')) {
-                systemProperty 'gemrender.freeze', project.property('freeze').toString()
-            }
-
-            if (project.hasProperty('spikeCapture')) {
-                systemProperty 'gemrender.autocapture', project.property('spikeCapture').toString()
-            }
-
-            if (project.hasProperty('ring')) {
-                systemProperty 'gemrender.ring', project.property('ring').toString()
-            }
-
-            if (project.hasProperty('orphan')) {
-                systemProperty 'gemrender.orphan', project.property('orphan').toString()
-            }
-
-            if (project.hasProperty('spin')) {
-                systemProperty 'gemrender.autospin', project.property('spin').toString()
-            }
-            if (project.hasProperty('spinNode')) {
-                systemProperty 'gemrender.autospinnode', project.property('spinNode').toString()
-            }
-
-            if (project.hasProperty('spikeReload')) {
-                systemProperty 'gemrender.autoreload', project.property('spikeReload').toString()
-            }
-
-            if (project.hasProperty('withRenderDoc')) {
-                def rdLib = file(project.renderdoc_lib)
-                if (!rdLib.exists()) {
-                    throw new GradleException("-PwithRenderDoc: ${rdLib} not found. Install renderdoc, or pass -Prenderdoc_lib=<path to librenderdoc.so>.")
-                }
-                environment 'LD_PRELOAD', rdLib.absolutePath
-
-                environment 'GEMRENDER_RENDERDOC_CAPTURE_PATH', new File(runDir, 'renderdoc/gemrender').absolutePath
-
-                environment 'RENDERDOC_HOOK_EGL', '0'
-                logger.lifecycle "RenderDoc: preloading ${rdLib}, captures -> ${new File(runDir, 'renderdoc')}"
+            if (!harnessJvmArgs.isEmpty()) {
+                jvmArguments.addAll harnessJvmArgs
             }
         }
 
@@ -583,31 +238,9 @@ modding.with {
 
             gameDirectory = runDir
 
-            if (project.hasProperty('makeWorld')) {
-                systemProperty 'gemrender.makeworld', project.property('makeWorld').toString()
-            }
-            if (project.hasProperty('stageWorld')) {
-                systemProperty 'gemrender.stageworld', project.property('stageWorld').toString()
-            }
-
-            if (project.hasProperty('cameraUp')) {
-                systemProperty 'gemrender.cameraup', project.property('cameraUp').toString()
-            }
-            if (project.hasProperty('cameraBack')) {
-                systemProperty 'gemrender.cameraback', project.property('cameraBack').toString()
-            }
             systemProperty 'forge.logging.markers', 'REGISTRIES'
             logLevel = org.slf4j.event.Level.DEBUG
 
-            if (project.hasProperty('backend')) {
-                systemProperty 'flw.backend', project.property('backend').toString()
-            }
-
-            if (project.hasProperty('jfr')) {
-                jvmArguments.addAll '-XX:+UnlockDiagnosticVMOptions', '-XX:+DebugNonSafepoints',
-                        '-XX:FlightRecorderOptions=stackdepth=192',
-                        '-XX:StartFlightRecording:name=idle,settings=none'
-            }
         }
     }
 
@@ -640,10 +273,34 @@ tasks.named('jar') {
     }
 }
 
+// Fabric-only sources, in both source sets: the Fabric API event registrations that stand in for the
+// Forge/NeoForge annotated event bus. No node built by this script is ever a Fabric node, and the
+// package names net.fabricmc types that are not on the classpath here, so it never reaches javac.
+//
+// A whole package rather than a `//? if fabric` guard on each file, because these files carry version
+// branches of their own and Stonecutter cannot nest one commented-out block inside another: a file
+// wrapped in `//? if fabric` may not contain an `//? if <1.21 { } else { }` underneath it. Excluding
+// the package keeps both guards flat. build.fabric.gradle excludes the mirror image -- see the
+// WaterSplitEvents and DirectEvents lines there.
+sourceSets.main.java.exclude 'com/wf/gemrender/fabric/**'
+sourceSets.harness.java.exclude 'com/wf/gemrender/fabric/**'
+sourceSets.bench.java.exclude 'com/wf/gemrender/fabric/**'
+
 if (!irisSupported) {
     sourceSets.main.java.exclude 'com/wf/gemrender/iris/**'
+}
+
+// Each bridge goes in only where it is resolvable. build.fabric.gradle splits these the same way and
+// for the same reason: 1.20.1 has no iris-flw-compat on one loader and none of Colorwheel on
+// another, and a mixin config naming a class that was never compiled is a hard load failure.
+if (!irisSupported || !irisflw_version) {
     sourceSets.main.java.exclude 'com/wf/gemrender/mixin/irisflw/**'
     sourceSets.main.resources.exclude 'gemrender.irisflw.mixins.json'
+}
+
+if (!irisSupported || !colorwheel_version) {
+    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/colorwheel/**'
+    sourceSets.main.resources.exclude 'gemrender.colorwheel.mixins.json'
 }
 
 ['direct', 'direct26'].each { set ->
@@ -655,6 +312,16 @@ if (!irisSupported) {
 
 if (!directSupported) {
     sourceSets.main.java.exclude 'com/wf/gemrender/direct/**'
+
+    // The item the direct path hands the player and the two models that dress it belong to that path,
+    // not to the harness, and the harness only reaches them through it. Every NeoForge/Forge node has
+    // direct on today, so this is here to stop the flag being a trap rather than because it fires.
+    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/DirectSpike.java'
+    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItem.java'
+    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItems.java'
+    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItemEvents.java'
+    sourceSets.harness.resources.exclude 'assets/gemrender/items/**'
+    sourceSets.harness.resources.exclude 'assets/gemrender/models/item/**'
 }
 
 if (harnessSupported) {
@@ -690,8 +357,11 @@ if (isLegacy) {
     if (directSupported) {
         mixinConfigs += directMixinConfig
     }
-    if (irisSupported) {
+    if (irisSupported && irisflw_version) {
         mixinConfigs += 'gemrender.irisflw.mixins.json'
+    }
+    if (irisSupported && colorwheel_version) {
+        mixinConfigs += 'gemrender.colorwheel.mixins.json'
     }
 
     dependencies {
@@ -715,6 +385,10 @@ configurations {
     runtimeClasspath.extendsFrom localRuntime
 
     shaderMod
+
+    // The Colorwheel bridge, resolved only when -Pcolorwheel asks for it: it and iris-flw-compat do
+    // the same job and cannot be installed together.
+    colorwheelMod
 }
 
 def flywheelDep = flywheelVendored ? null : "dev.engine-room.flywheel:${flywheel_artifact}:${flywheel_version}"
@@ -762,11 +436,28 @@ dependencies {
     }
 
     if (irisSupported) {
-        shaderMod("maven.modrinth:sodium:${sodium_version}") { transitive = false }
-        shaderMod("maven.modrinth:iris:${iris_version}") { transitive = false }
-        shaderMod("maven.modrinth:iris-flw-compat:${irisflw_version}") { transitive = false }
+        shaderMod("maven.modrinth:${sodiumProject}:${sodium_version}") { transitive = false }
+        shaderMod("maven.modrinth:${irisProject}:${iris_version}") { transitive = false }
 
-        compileOnly("maven.modrinth:iris:${iris_version}") { transitive = false }
+        if (irisflw_version) {
+            shaderMod("maven.modrinth:iris-flw-compat:${irisflw_version}") { transitive = false }
+        }
+
+        if (colorwheel_version) {
+            colorwheelMod("maven.modrinth:colorwheel:${colorwheel_version}") { transitive = false }
+        }
+
+        compileOnly("maven.modrinth:${irisProject}:${iris_version}") { transitive = false }
+
+        // The bridges are compiled against, not only staged: on the legacy node Mixin's annotation
+        // processor resolves `targets = "..."` at compile time and fails the build when the named
+        // class is not on the classpath, even with remap = false. Harmless on the others.
+        if (irisflw_version) {
+            compileOnly("maven.modrinth:iris-flw-compat:${irisflw_version}") { transitive = false }
+        }
+        if (colorwheel_version) {
+            compileOnly("maven.modrinth:colorwheel:${colorwheel_version}") { transitive = false }
+        }
     }
 
     benchCompileOnly sourceSets.main.output
@@ -964,97 +655,36 @@ tasks.register('makeKtxAssets', JavaExec) {
     dependsOn tasks.named('ktxTestClasses')
 }
 
-def irisEnabled = project.hasProperty('iris') && project.property('iris').toString() != 'false'
-def shaderPack = project.hasProperty('shaders') ? project.property('shaders').toString() : null
-
-def shaderOptions = project.hasProperty('shaderOptions')
-        ? project.property('shaderOptions').toString()
-        : null
-
-tasks.register('stripIrisFlwJarJar', Jar) {
-    group = 'build'
-    description = 'Removes iris-flw-compat\'s nested Flywheel, which duplicates the classpath one.'
-    archiveFileName = 'iris-flywheel-compat-nojarjar.jar'
-    destinationDirectory = layout.buildDirectory.dir('shaderMods')
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from({
-        def jar = configurations.shaderMod.find { it.name.contains('iris-flw-compat') }
-        jar == null ? [] : zipTree(jar)
-    }) {
-        exclude 'META-INF/jarjar/**'
-    }
-}
-
-tasks.register('prepareRunMods') {
-    group = 'build'
-    description = 'Syncs run/mods, run/shaderpacks and run/config/iris.properties to the -P flags.'
-    if (irisEnabled) {
-        dependsOn tasks.named('stripIrisFlwJarJar')
-    }
-
-    doLast {
-        def modsDir = new File(runDir, 'mods')
-        modsDir.mkdirs()
-        modsDir.listFiles({ File f -> f.name.endsWith('.jar') } as FileFilter)
-                ?.each { it.delete() }
-
-        if (irisEnabled) {
-            def stripped = tasks.named('stripIrisFlwJarJar').get().archiveFile.get().asFile
-            def others = configurations.shaderMod.findAll { !it.name.contains('iris-flw-compat') }
-            copy {
-                from others
-                from stripped
-                into modsDir
-            }
-            logger.lifecycle "Shader stack: ${(others + [stripped]).collect { it.name }.join(', ')}"
-        } else {
-            logger.lifecycle 'Shader stack: none (run/mods emptied)'
-        }
-
-        def packSource = new File(internalDir, 'shaderpacks')
-        if (packSource.isDirectory()) {
-            copy {
-                from packSource
-                into new File(runDir, 'shaderpacks')
-            }
-        } else if (shaderPack != null) {
-            logger.lifecycle "Shader packs: no ${packSource}; '${shaderPack}' must already be in " +
-                    "run/shaderpacks."
-        }
-
-        def irisConfig = new File(runDir, 'config/iris.properties')
-        irisConfig.parentFile.mkdirs()
-        irisConfig.text = """\
-                |# Written by Gradle's prepareRunMods task. Hand edits are overwritten every run.
-                |enableShaders=${shaderPack != null}
-                |shaderPack=${shaderPack ?: ''}
-                |allowUnknownShaders=true
-                |disableUpdateMessage=true
-                |enableDebugOptions=false
-                |maxShadowRenderDistance=32
-                |colorSpace=SRGB
-                |""".stripMargin()
-        logger.lifecycle "Iris: ${shaderPack != null ? "shaders on, pack '${shaderPack}'" : 'shaders off'}"
-
-        if (shaderPack != null) {
-            def packOptions = new File(runDir, "shaderpacks/${shaderPack}.txt")
-            packOptions.parentFile.mkdirs()
-            if (shaderOptions != null) {
-                packOptions.text = shaderOptions.split(',')
-                        .collect { it.trim() }
-                        .findAll { !it.isEmpty() }
-                        .join('\n') + '\n'
-                logger.lifecycle "Shader options: ${shaderOptions}"
-            } else {
-
-                packOptions.delete()
-            }
-        }
-    }
-}
+// The shader stack: which of iris-flw-compat and Colorwheel bridges Flywheel to Iris, what lands in
+// run/mods, and what run/config/iris.properties says. Shared with build.fabric.gradle -- the mods
+// are the same Modrinth projects on both loaders and the staging is identical, so only the two
+// configurations they resolve through differ, and those stay in each buildscript.
+ext.shaderRunDir = runDir
+ext.shaderInternalDir = internalDir
+apply from: "${rootProject.projectDir}/gradle/shader-mods.gradle"
 
 def renderDocCaptureDir = new File(runDir, 'renderdoc')
 def renderDocXmlDir = layout.buildDirectory.dir('renderdoc')
+
+def apitraceFile = new File(runDir, 'apitrace/gemrender.trace')
+
+tasks.register('apitraceDump', Exec) {
+    group = 'verification'
+    description = 'Dumps the GL call list of the newest apitrace capture to build/apitrace/gemrender.txt.'
+
+    doFirst {
+        if (!apitraceFile.isFile()) {
+            throw new GradleException("No trace at ${apitraceFile}. Run `./gradlew :${mcVersion}:runClient " +
+                    "-PwithApitrace ...` first (see gemrender-internal/docs/TESTING.md).")
+        }
+        def outDir = layout.buildDirectory.dir('apitrace').get().asFile
+        outDir.mkdirs()
+        def outFile = new File(outDir, 'gemrender.txt')
+        logger.lifecycle "apitrace: dumping ${apitraceFile.name} -> ${outFile}"
+        standardOutput = new FileOutputStream(outFile)
+        commandLine 'apitrace', 'dump', apitraceFile.absolutePath
+    }
+}
 
 tasks.register('renderDocConvert', Exec) {
     group = 'verification'

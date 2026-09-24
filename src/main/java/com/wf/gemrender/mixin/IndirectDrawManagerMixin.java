@@ -1,6 +1,8 @@
 package com.wf.gemrender.mixin;
 
+//? if water {
 import com.wf.gemrender.water.WaterSplit;
+//?}
 import dev.engine_room.flywheel.api.instance.InstanceType;
 import dev.engine_room.flywheel.backend.compile.PipelineCompiler;
 import dev.engine_room.flywheel.backend.engine.LightStorage;
@@ -11,6 +13,7 @@ import dev.engine_room.flywheel.backend.engine.indirect.OitFramebuffer;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -27,19 +30,24 @@ abstract class IndirectDrawManagerMixin {
     @Final
     private OitFramebuffer oitFramebuffer;
 
+    @Unique
+    private void gemrender$submitEvaluate() {
+        for (IndirectCullingGroup<?> group : cullingGroups.values()) {
+            //? if >=26.1 {
+            /*group.submitOrderIndependent(PipelineCompiler.OitMode.EVALUATE);
+             *///?} else {
+            group.submitTransparent(PipelineCompiler.OitMode.EVALUATE);
+            //?}
+        }
+    }
+
+    //? if water {
     @Inject(method = "render", at = @At(value = "INVOKE",
             target = "Ldev/engine_room/flywheel/backend/engine/indirect/OitFramebuffer;composite()V"))
     private void gemrender$beforeComposite(LightStorage lightStorage, EnvironmentStorage environmentStorage,
                                            CallbackInfo ci) {
         WaterSplit.getInstance()
-                .beforeOitComposite(oitFramebuffer, () -> {
-                    for (IndirectCullingGroup<?> group : cullingGroups.values()) {
-                        //? if >=26.1 {
-                        /*group.submitOrderIndependent(PipelineCompiler.OitMode.EVALUATE);
-                         *///?} else {
-                        group.submitTransparent(PipelineCompiler.OitMode.EVALUATE);
-                        //?}
-                    }
-                });
+                .beforeOitComposite(oitFramebuffer, this::gemrender$submitEvaluate);
     }
+    //?}
 }

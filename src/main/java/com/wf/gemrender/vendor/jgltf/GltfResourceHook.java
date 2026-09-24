@@ -1,5 +1,7 @@
 package com.wf.gemrender.vendor.jgltf;
 
+import com.wf.gemrender.Ids;
+
 import com.wf.gemrender.vendor.jgltf.model.io.Buffers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
@@ -41,7 +43,7 @@ public final class GltfResourceHook {
         if (s == null || s.isEmpty()) {
             return null;
         }
-        return ResourceLocation.parse(s);
+        return Ids.parse(s);
     }
 
     /**

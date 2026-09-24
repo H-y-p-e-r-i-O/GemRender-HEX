@@ -12,12 +12,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.wf.gemrender.Ids;
+
 import net.minecraft.resources.ResourceLocation;
 
 class ModelCacheTest {
 
 	private static ResourceLocation id(String path) {
-		return ResourceLocation.fromNamespaceAndPath("gemrender", path);
+		return Ids.of("gemrender", path);
 	}
 
 	private static final class Recorder {

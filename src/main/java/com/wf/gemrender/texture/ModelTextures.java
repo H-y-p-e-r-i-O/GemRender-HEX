@@ -1,5 +1,7 @@
 package com.wf.gemrender.texture;
 
+import com.wf.gemrender.Ids;
+
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.wf.gemrender.GemRender;
@@ -66,7 +68,7 @@ public final class ModelTextures {
     }
 
     static ResourceLocation decodedId(ResourceLocation source) {
-        return ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID,
+        return Ids.of(GemRender.MOD_ID,
                 "decoded/" + source.getNamespace() + "/" + source.getPath());
     }
 

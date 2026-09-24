@@ -9,6 +9,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.gltf.GemRenderGltfModel;
 import com.wf.gemrender.texture.VariantUv;
 
@@ -19,11 +20,11 @@ import net.minecraft.resources.ResourceLocation;
 @Tag("bootstrap")
 class RigSkinsTest {
 	private static final ResourceLocation ATLAS =
-			ResourceLocation.fromNamespaceAndPath("gemrender", "atlas/test/crab");
+			Ids.of("gemrender", "atlas/test/crab");
 	private static final ResourceLocation RED =
-			ResourceLocation.fromNamespaceAndPath("gemrender", "textures/red.png");
+			Ids.of("gemrender", "textures/red.png");
 	private static final ResourceLocation BLUE =
-			ResourceLocation.fromNamespaceAndPath("gemrender", "textures/blue.png");
+			Ids.of("gemrender", "textures/blue.png");
 
 	private static final Material MATERIAL = SimpleMaterial.builder()
 			.texture(RED)

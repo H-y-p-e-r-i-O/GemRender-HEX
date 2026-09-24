@@ -43,13 +43,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 //? if neoforge {
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
-//?} else {
+//?} else if forge {
 /*import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -57,7 +58,15 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 *///?}
 
+import com.mojang.brigadier.arguments.ArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
+
+import java.util.function.Function;
+
+//? if !fabric {
 @EventBusSubscriber(modid = GemRender.MOD_ID, value = Dist.CLIENT)
+//?}
 public final class GemRenderClient {
 	private GemRenderClient() {
 	}
@@ -111,6 +120,9 @@ public final class GemRenderClient {
 	private static final String AUTO_CLOUDS = System.getProperty("gemrender.clouds", "");
 
 	public static final String VERDICT_PREFIX = "GEMRENDER-SPIKE-VERDICT";
+
+	public static final String BUILD_VERSION =
+			System.getProperty("gemrender.buildversion", "unknown");
 
 	private static final int SCENE_ALTITUDE = 60;
 
@@ -181,11 +193,24 @@ public final class GemRenderClient {
 		return AUTO_VEHICLE_PARTS > 0;
 	}
 
+	private static String activeBackend() {
+		try {
+			var backend = dev.engine_room.flywheel.api.backend.BackendManager.currentBackend();
+			var id = dev.engine_room.flywheel.api.backend.Backend.REGISTRY.getId(backend);
+			return id == null ? backend.getClass()
+					.getName() : id.toString();
+		} catch (Throwable t) {
+			return "<unavailable>";
+		}
+	}
+
 	private static String sceneLine() {
 		Minecraft mc = Minecraft.getInstance();
 		StringBuilder out = new StringBuilder();
 
-		out.append("graphics=")
+		out.append("backend=")
+				.append(activeBackend())
+				.append("  graphics=")
 				.append(mc.options.graphicsMode()
 						.get())
 				.append("  shaderTransparency=")
@@ -200,8 +225,7 @@ public final class GemRenderClient {
 					.append(com.wf.gemrender.spike.ParticleSpikeVisual.BLEND);
 		}
 
-		String split = com.wf.gemrender.water.WaterSplit.getInstance()
-				.report();
+		String split = waterSplitReport();
 		int detail = split.indexOf('(');
 		out.append("  waterSplit=")
 				.append(detail < 0 ? split : split.substring(0, detail));
@@ -416,18 +440,64 @@ public final class GemRenderClient {
 	//? if neoforge {
 	@SubscribeEvent
 	public static void onClientTick(ClientTickEvent.Post event) {
-	//?} else {
+		tick();
+	}
+	//?} else if forge {
 	/*@SubscribeEvent
 	public static void onClientTick(TickEvent.ClientTickEvent event) {
 		if (event.phase != TickEvent.Phase.END) {
 			return;
 		}
+		tick();
+	}
 *///?}
+
+	//? if water {
+	private static String waterSplitReport() {
+		return com.wf.gemrender.water.WaterSplit.getInstance()
+				.report();
+	}
+
+	private static void resetWaterSplit() {
+		com.wf.gemrender.water.WaterSplit.getInstance()
+				.resetRun();
+	}
+	//?} else {
+	/*private static String waterSplitReport() {
+		return "unsupported";
+	}
+
+	private static void resetWaterSplit() {
+	}
+	*///?}
+
+	//? if direct {
+	private static void resetDirect() {
+		com.wf.gemrender.direct.DirectStats.reset();
+	}
+	//?} else {
+	/*private static void resetDirect() {
+	}
+	*///?}
+
+	public static void tick() {
 		if (autoCount() <= 0) {
 			return;
 		}
 
 		Minecraft mc = Minecraft.getInstance();
+
+		if (mc.getOverlay() != null) {
+			return;
+		}
+
+		if (mc.options.onboardAccessibility) {
+			mc.options.onboardAccessibility = false;
+			mc.options.save();
+			mc.setScreen(new net.minecraft.client.gui.screens.TitleScreen());
+			GemRender.LOGGER.info("Auto-spike: dismissed the accessibility onboarding screen.");
+			return;
+		}
 
 		if (!MAKE_WORLD.isEmpty() && !worldRequested && mc.level == null
 				&& mc.screen instanceof net.minecraft.client.gui.screens.TitleScreen) {
@@ -486,9 +556,13 @@ public final class GemRenderClient {
 
 			var connection = mc.player.connection;
 
+			//? if direct {
 			connection.sendCommand(com.wf.gemrender.spike.DirectSpike.needsHand()
 					? "gamemode creative"
 					: "gamemode spectator");
+			//?} else {
+			/*connection.sendCommand("gamemode spectator");
+			*///?}
 			connection.sendCommand("time set noon");
 			connection.sendCommand("weather clear");
 
@@ -603,12 +677,14 @@ public final class GemRenderClient {
 			}
 		}
 
+		//? if direct {
 		if (com.wf.gemrender.spike.DirectSpike.needsHand() && mc.player != null
 				&& mc.player.getAbilities().mayfly
 				&& !mc.player.getAbilities().flying) {
 			mc.player.getAbilities().flying = true;
 			mc.player.onUpdateAbilities();
 		}
+		//?}
 
 		SpikeHud.progress((AUTO_ROW.isEmpty() ? "" : "[" + AUTO_ROW + "] ") + "tick " + ticksSinceSpike
 				+ "/" + AUTO_EXIT_TICKS);
@@ -624,14 +700,13 @@ public final class GemRenderClient {
 					.resetRun();
 			ParticleBuffer.getInstance()
 					.resetRun();
-			com.wf.gemrender.water.WaterSplit.getInstance()
-					.resetRun();
+			resetWaterSplit();
 			com.wf.gemrender.water.Absorbance.getInstance()
 					.resetRun();
 			com.wf.gemrender.volume.Volumetrics.getInstance()
 					.resetRun();
 			com.wf.gemrender.render.GlAudit.resetRun();
-			com.wf.gemrender.direct.DirectStats.reset();
+			resetDirect();
 		}
 
 		if (ticksSinceSpike >= AUTO_EXIT_TICKS) {
@@ -659,7 +734,7 @@ public final class GemRenderClient {
 
 			FrameCost cost = FrameCost.getInstance();
 			GemRender.LOGGER.info(
-					"{} boneBufferInitialised={} matricesLastFrame={} expectedMatrices={} cullSphere={} "
+					"{} mc={} boneBufferInitialised={} matricesLastFrame={} expectedMatrices={} cullSphere={} "
 							+ "instances={} poseRequests={} poseEvaluations={} sync={} asset={} backend={} "
 							+ "frame={}x{} modelGeneration={} modelsLoaded={} morphFloats={} "
 							+ "morphFloatsBefore={} frozenAt={} spin={} spinNode={} lod={} lodMax={} "
@@ -673,6 +748,7 @@ public final class GemRenderClient {
 							+ "particleSizeScale={} particleUploadFrames={} particleUploadCalls={} "
 							+ "particleUploadBytes={}",
 					VERDICT_PREFIX,
+					BUILD_VERSION,
 					bones.isInitialized(),
 					bones.lastUploadedCount(),
 					expected,
@@ -682,7 +758,7 @@ public final class GemRenderClient {
 					poses.evaluationsLastFrame(),
 					AUTO_SYNC,
 					asset != null ? asset : "cubes",
-					System.getProperty("flw.backend", "<default>"),
+					activeBackend(),
 
 					mc.getMainRenderTarget().width,
 					mc.getMainRenderTarget().height,
@@ -709,8 +785,7 @@ public final class GemRenderClient {
 					cost.nanosPerPose(),
 					cost.meanInstanceWrites(),
 
-					com.wf.gemrender.water.WaterSplit.getInstance()
-							.report(),
+					waterSplitReport(),
 
 					com.wf.gemrender.water.Absorbance.getInstance()
 							.report(),
@@ -746,10 +821,12 @@ public final class GemRenderClient {
 					ParticleBuffer.getInstance()
 							.uploadBytes());
 
+			//? if direct {
 			String direct = com.wf.gemrender.spike.DirectSpike.verdict();
 			if (!direct.isEmpty()) {
 				GemRender.LOGGER.info("{}-DIRECT{}", VERDICT_PREFIX, direct);
 			}
+			//?}
 
 			if (AUTO_ENTITY) {
 				GemRender.LOGGER.info("{}-ENTITY entityVisuals={} entityLive={} entityFrames={} "
@@ -1224,172 +1301,207 @@ public final class GemRenderClient {
 				+ (morphFloats + BoneBuffer.FLOATS_PER_MATRIX - 1) / BoneBuffer.FLOATS_PER_MATRIX;
 	}
 
+	//? if !fabric {
 	@SubscribeEvent
 	public static void registerClientCommands(RegisterClientCommandsEvent event) {
-		event.getDispatcher().register(Commands.literal(GemRender.MOD_ID)
-				.then(Commands.literal("capture")
-						.executes(ctx -> capture(ctx.getSource(), 1))
-						.then(Commands.argument("frames", IntegerArgumentType.integer(1, 64))
-								.executes(ctx -> capture(ctx.getSource(),
-										IntegerArgumentType.getInteger(ctx, "frames")))))
-				.then(Commands.literal("spike")
-						.executes(ctx -> spike(ctx.getSource(), 1024))
-						.then(Commands.argument("count", IntegerArgumentType.integer(1, 100000))
-								.executes(ctx -> spike(ctx.getSource(),
-										IntegerArgumentType.getInteger(ctx, "count")))))
-				.then(Commands.literal("particles")
-						.executes(ctx -> particles(ctx.getSource(), 3000))
-						.then(Commands.argument("count", IntegerArgumentType.integer(1, 200000))
-								.executes(ctx -> particles(ctx.getSource(),
-										IntegerArgumentType.getInteger(ctx, "count")))))
-				.then(gltfCommand("radar", SpikeAssets.RADAR, "running_loop"))
-				.then(gltfCommand("rig", SpikeAssets.RIG, "curl"))
-				.then(gltfCommand("morph", SpikeAssets.MORPH, "pump"))
-				.then(gltfCommand("glass", SpikeAssets.GLASS, "turn"))
-				.then(gltfCommand("pbr", SpikeAssets.PBR, "turn"))
-				.then(Commands.literal("status")
-						.executes(ctx -> status(ctx.getSource()))));
+		event.getDispatcher()
+				.register(commands(GemRenderClient::sourceOf));
 	}
 
-	private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> gltfCommand(
-			String name, ResourceLocation asset, String defaultAnimation) {
-		return Commands.literal(name)
-				.executes(ctx -> gltf(ctx.getSource(), asset, 16, defaultAnimation, false, 0.0f))
-				.then(Commands.argument("count", IntegerArgumentType.integer(1, 10000))
-						.executes(ctx -> gltf(ctx.getSource(), asset,
+	private static SpikeSource sourceOf(CommandSourceStack stack) {
+		return new SpikeSource() {
+			@Override
+			public void ok(Component message) {
+				stack.sendSuccess(() -> message, false);
+			}
+
+			@Override
+			public void fail(Component message) {
+				stack.sendFailure(message);
+			}
+
+			@Override
+			public Vec3 position() {
+				return stack.getPosition();
+			}
+		};
+	}
+	//?}
+
+	public static <S> LiteralArgumentBuilder<S> commands(Function<S, SpikeSource> adapt) {
+		return GemRenderClient.<S>literal(GemRender.MOD_ID)
+				.then(GemRenderClient.<S>literal("capture")
+						.executes(ctx -> capture(adapt.apply(ctx.getSource()), 1))
+						.then(GemRenderClient.<S, Integer>argument("frames", IntegerArgumentType.integer(1, 64))
+								.executes(ctx -> capture(adapt.apply(ctx.getSource()),
+										IntegerArgumentType.getInteger(ctx, "frames")))))
+				.then(GemRenderClient.<S>literal("spike")
+						.executes(ctx -> spike(adapt.apply(ctx.getSource()), 1024))
+						.then(GemRenderClient.<S, Integer>argument("count", IntegerArgumentType.integer(1, 100000))
+								.executes(ctx -> spike(adapt.apply(ctx.getSource()),
+										IntegerArgumentType.getInteger(ctx, "count")))))
+				.then(GemRenderClient.<S>literal("particles")
+						.executes(ctx -> particles(adapt.apply(ctx.getSource()), 3000))
+						.then(GemRenderClient.<S, Integer>argument("count", IntegerArgumentType.integer(1, 200000))
+								.executes(ctx -> particles(adapt.apply(ctx.getSource()),
+										IntegerArgumentType.getInteger(ctx, "count")))))
+				.then(gltfCommand(adapt, "radar", SpikeAssets.RADAR, "running_loop"))
+				.then(gltfCommand(adapt, "rig", SpikeAssets.RIG, "curl"))
+				.then(gltfCommand(adapt, "morph", SpikeAssets.MORPH, "pump"))
+				.then(gltfCommand(adapt, "glass", SpikeAssets.GLASS, "turn"))
+				.then(gltfCommand(adapt, "pbr", SpikeAssets.PBR, "turn"))
+				.then(GemRenderClient.<S>literal("status")
+						.executes(ctx -> status(adapt.apply(ctx.getSource()))));
+	}
+
+	private static <S> LiteralArgumentBuilder<S> literal(String name) {
+		return LiteralArgumentBuilder.literal(name);
+	}
+
+	private static <S, T> RequiredArgumentBuilder<S, T> argument(String name, ArgumentType<T> type) {
+		return RequiredArgumentBuilder.argument(name, type);
+	}
+
+	private static <S> LiteralArgumentBuilder<S> gltfCommand(Function<S, SpikeSource> adapt, String name,
+			ResourceLocation asset, String defaultAnimation) {
+		return GemRenderClient.<S>literal(name)
+				.executes(ctx -> gltf(adapt.apply(ctx.getSource()), asset, 16, defaultAnimation, false, 0.0f))
+				.then(GemRenderClient.<S, Integer>argument("count", IntegerArgumentType.integer(1, 10000))
+						.executes(ctx -> gltf(adapt.apply(ctx.getSource()), asset,
 								IntegerArgumentType.getInteger(ctx, "count"), defaultAnimation, false, 0.0f))
-						.then(Commands.argument("animation", StringArgumentType.word())
-								.executes(ctx -> gltf(ctx.getSource(), asset,
+						.then(GemRenderClient.<S, String>argument("animation", StringArgumentType.word())
+								.executes(ctx -> gltf(adapt.apply(ctx.getSource()), asset,
 										IntegerArgumentType.getInteger(ctx, "count"),
 										StringArgumentType.getString(ctx, "animation"), false, 0.0f))
-								.then(Commands.argument("sync", BoolArgumentType.bool())
-										.executes(ctx -> gltf(ctx.getSource(), asset,
+								.then(GemRenderClient.<S, Boolean>argument("sync", BoolArgumentType.bool())
+										.executes(ctx -> gltf(adapt.apply(ctx.getSource()), asset,
 												IntegerArgumentType.getInteger(ctx, "count"),
 												StringArgumentType.getString(ctx, "animation"),
 												BoolArgumentType.getBool(ctx, "sync"), 0.0f))
-										.then(Commands.argument("spin", FloatArgumentType.floatArg(-64.0f, 64.0f))
-												.executes(ctx -> gltf(ctx.getSource(), asset,
+										.then(GemRenderClient.<S, Float>argument("spin",
+												FloatArgumentType.floatArg(-64.0f, 64.0f))
+												.executes(ctx -> gltf(adapt.apply(ctx.getSource()), asset,
 														IntegerArgumentType.getInteger(ctx, "count"),
 														StringArgumentType.getString(ctx, "animation"),
 														BoolArgumentType.getBool(ctx, "sync"),
 														FloatArgumentType.getFloat(ctx, "spin")))))));
 	}
 
-	private static int spike(CommandSourceStack source, int count) {
+	private static int spike(SpikeSource source, int count) {
 		Level level = Minecraft.getInstance().level;
 		if (level == null) {
-			source.sendFailure(Component.literal("No level."));
+			source.fail(Component.literal("No level."));
 			return 0;
 		}
 
 		if (!VisualizationManager.supportsVisualization(level)) {
-			source.sendFailure(Component.literal(
+			source.fail(Component.literal(
 					"Flywheel visualization is off for this level. Check the Flywheel backend is not set to 'off'."));
 			return 0;
 		}
 
-		BlockPos origin = BlockPos.containing(source.getPosition());
+		BlockPos origin = BlockPos.containing(source.position());
 		VisualizationManager.getOrThrow(level)
 				.effects()
 				.queueAdd(new SpikeEffect(level, origin, count));
 
-		source.sendSuccess(() -> Component.literal(
+		source.ok(Component.literal(
 				"Spawned " + count + " skinned cubes at " + origin.toShortString()
-						+ ". Run /gemrender status to confirm the bone buffer is live."), false);
+						+ ". Run /gemrender status to confirm the bone buffer is live."));
 		return count;
 	}
 
-	private static int particles(CommandSourceStack source, int count) {
+	private static int particles(SpikeSource source, int count) {
 		Level level = Minecraft.getInstance().level;
 		if (level == null) {
-			source.sendFailure(Component.literal("No level."));
+			source.fail(Component.literal("No level."));
 			return 0;
 		}
 
 		if (!VisualizationManager.supportsVisualization(level)) {
-			source.sendFailure(Component.literal(
+			source.fail(Component.literal(
 					"Flywheel visualization is off for this level. Check the Flywheel backend is not set to 'off'."));
 			return 0;
 		}
 
-		BlockPos origin = BlockPos.containing(source.getPosition());
+		BlockPos origin = BlockPos.containing(source.position());
 		VisualizationManager.getOrThrow(level)
 				.effects()
 				.queueAdd(new ParticleSpikeEffect(level, origin, count));
 
-		source.sendSuccess(() -> Component.literal("Spawned a " + count + " particle fountain at "
-				+ origin.toShortString() + ". The CPU writes a slot per spawn and nothing per frame."), false);
+		source.ok(Component.literal("Spawned a " + count + " particle fountain at "
+				+ origin.toShortString() + ". The CPU writes a slot per spawn and nothing per frame."));
 		return count;
 	}
 
-	private static int gltf(CommandSourceStack source, ResourceLocation asset, int count, String animation,
+	private static int gltf(SpikeSource source, ResourceLocation asset, int count, String animation,
 			boolean sync, float spin) {
 		Level level = Minecraft.getInstance().level;
 		if (level == null || !VisualizationManager.supportsVisualization(level)) {
-			source.sendFailure(Component.literal("No level, or Flywheel visualization is off."));
+			source.fail(Component.literal("No level, or Flywheel visualization is off."));
 			return 0;
 		}
 
-		BlockPos origin = BlockPos.containing(source.getPosition());
+		BlockPos origin = BlockPos.containing(source.position());
 		VisualizationManager.getOrThrow(level)
 				.effects()
 				.queueAdd(new GltfEffect(level, origin, asset, count, animation, sync, 1.0f, spin,
 						AUTO_SPIN_NODE));
 
-		source.sendSuccess(() -> Component.literal("Spawned " + count + " x " + asset + " at "
+		source.ok(Component.literal("Spawned " + count + " x " + asset + " at "
 				+ origin.toShortString() + " playing '" + animation + "'"
 				+ (spin == 0.0f ? "" : " with a " + spin + " turn/s spin on slot " + AUTO_SPIN_NODE)
-				+ (sync ? " in step." : ", each at its own phase.")), false);
+				+ (sync ? " in step." : ", each at its own phase.")));
 		return count;
 	}
 
-	private static int status(CommandSourceStack source) {
+	private static int status(SpikeSource source) {
 		BoneBuffer bones = BoneBuffer.getInstance();
 		PoseCache poses = PoseCache.getInstance();
 		boolean live = bones.isInitialized();
 
-		source.sendSuccess(() -> Component.literal(
+		source.ok(Component.literal(
 				"GemRender: bone buffer " + (live ? "LIVE" : "NOT INITIALISED")
 						+ ", " + bones.lastUploadedCount() + " matrices uploaded last frame"
-						+ ", texture unit " + BoneBuffer.TEXTURE_UNIT), false);
+						+ ", texture unit " + BoneBuffer.TEXTURE_UNIT));
 
-		source.sendSuccess(() -> Component.literal(
+		source.ok(Component.literal(
 				"  poses: " + poses.evaluationsLastFrame() + " evaluated for "
 						+ poses.requestsLastFrame() + " instances last frame, quantum "
-						+ poses.quantumSeconds() + "s"), false);
+						+ poses.quantumSeconds() + "s"));
 
 		ModelCache<?> models = GemRenderModels.cache();
-		source.sendSuccess(() -> Component.literal(
+		source.ok(Component.literal(
 				"  models: " + models.loadedCount() + " loaded of " + models.wanted()
 						.size() + " wanted"
 						+ (models.failedCount() == 0 ? "" : ", " + models.failedCount() + " FAILED")
 						+ ", generation " + models.generation()
 						+ ", morph buffer " + MorphBuffer.getInstance()
-								.floatCount() + " floats"), false);
+								.floatCount() + " floats"));
 
 		FrameCost cost = FrameCost.getInstance();
-		source.sendSuccess(() -> Component.literal(
+		source.ok(Component.literal(
 				"  cost, last frame: " + cost.poseNanos() / 1000 + "us evaluating poses, "
 						+ cost.overheadNanos() / 1000 + "us per-instance, "
 						+ cost.uploadNanos() / 1000 + "us uploading, "
-						+ cost.instanceWrites() + " instances re-uploaded"), false);
-		source.sendSuccess(() -> Component.literal(
+						+ cost.instanceWrites() + " instances re-uploaded"));
+		source.ok(Component.literal(
 				"  cost, mean of " + cost.sampledFrames() + " frames: " + cost.meanPoseNanos() / 1000
 						+ "us poses, " + cost.meanOverheadNanos() / 1000 + "us per-instance, "
 						+ cost.meanUploadNanos() / 1000 + "us uploading, "
-						+ cost.nanosPerPose() + "ns per pose"), false);
+						+ cost.nanosPerPose() + "ns per pose"));
 
 		if (!live) {
-			source.sendFailure(Component.literal(
+			source.fail(Component.literal(
 					"The bone buffer has never uploaded. Either nothing is being drawn, or DrawManagerMixin "
 							+ "is no longer applying to Flywheel's DrawManager."));
 		}
 		return live ? 1 : 0;
 	}
 
-	private static int capture(CommandSourceStack source, int frames) {
+	private static int capture(SpikeSource source, int frames) {
 		if (!GemRenderRenderDoc.isAvailable()) {
-			source.sendFailure(Component.literal(
+			source.fail(Component.literal(
 					"RenderDoc is not attached to this process. Relaunch with: ./gradlew runClient -PwithRenderDoc"));
 			return 0;
 		}
@@ -1399,13 +1511,13 @@ public final class GemRenderClient {
 				: GemRenderRenderDoc.triggerMultiFrameCapture(frames);
 
 		if (!triggered) {
-			source.sendFailure(Component.literal("RenderDoc refused the capture request."));
+			source.fail(Component.literal("RenderDoc refused the capture request."));
 			return 0;
 		}
 
-		source.sendSuccess(() -> Component.literal(
+		source.ok(Component.literal(
 				"Capturing " + frames + (frames == 1 ? " frame" : " frames")
-						+ ". Convert with: ./gradlew renderDocConvert"), false);
+						+ ". Convert with: ./gradlew renderDocConvert"));
 		return frames;
 	}
 }

@@ -10,6 +10,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import com.wf.gemrender.Ids;
 import com.wf.gemrender.gltf.GltfMaterial.AlphaMode;
 import com.wf.gemrender.vendor.jgltf.model.GltfModel;
 import com.wf.gemrender.vendor.jgltf.model.MeshModel;
@@ -32,8 +33,8 @@ class GltfMaterialTest {
 	private static final int MATERIAL_STEEL = 1;
 	private static final int MATERIAL_GRILLE = 2;
 
-	private static final ResourceLocation A = ResourceLocation.fromNamespaceAndPath("gemrender", "a");
-	private static final ResourceLocation B = ResourceLocation.fromNamespaceAndPath("gemrender", "b");
+	private static final ResourceLocation A = Ids.of("gemrender", "a");
+	private static final ResourceLocation B = Ids.of("gemrender", "b");
 
 	@Test
 	void opaqueIsFlywheelsDefaultDraw() {

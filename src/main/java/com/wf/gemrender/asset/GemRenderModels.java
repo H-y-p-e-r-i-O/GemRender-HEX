@@ -8,13 +8,17 @@ import com.wf.gemrender.gltf.GltfImporter;
 import com.wf.gemrender.render.MorphBuffer;
 import com.wf.gemrender.texture.ModelTextures;
 import com.wf.gemrender.vendor.jgltf.GltfResourceHook;
+//? if fabric {
+/*import java.util.Optional;
+*///?} else {
 import dev.engine_room.flywheel.api.event.EndClientResourceReloadEvent;
+//?}
 import net.minecraft.resources.ResourceLocation;
 //? if neoforge {
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
-//?} else {
+//?} elif forge {
 /*import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod.EventBusSubscriber;
@@ -30,7 +34,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Declares and resolves GemRender assets: {@code handle(id)} to declare, {@code get(id)} to read.
  */
+//? if !fabric {
 @EventBusSubscriber(modid = GemRender.MOD_ID, value = Dist.CLIENT)
+//?}
 public final class GemRenderModels {
     private static final ModelCache<GemRenderGltfModel> MODELS =
             new ModelCache<>("GemRender models", GemRenderModels::load, GemRenderModels::dispose);
@@ -199,13 +205,32 @@ public final class GemRenderModels {
      * arrive over the next few frames, and a handle asked for one before it lands answers {@code null}
      * exactly as it does the first time an asset is wanted.
      */
+    /**
+     * Flywheel raises the end of a client resource reload itself, but spells it differently per
+     * loader: an event class Forge and NeoForge find by annotation, a callback Fabric registers from
+     * its entrypoint. Only the subscription differs — {@link #onResourceReload()} is what both run.
+     */
+    //? if fabric {
+    /*public static void onEndClientResourceReload(net.minecraft.client.Minecraft minecraft,
+            net.minecraft.server.packs.resources.ResourceManager resources, boolean first,
+            Optional<Throwable> error) {
+        if (error.isPresent()) {
+            return;
+        }
+        onResourceReload();
+    }
+    *///?} else {
     @SubscribeEvent
     public static void onEndClientResourceReload(EndClientResourceReloadEvent event) {
         if (event.error()
                 .isPresent()) {
             return;
         }
+        onResourceReload();
+    }
+    //?}
 
+    private static void onResourceReload() {
         MODELS.quiesce();
         PARTS.quiesce();
         BUILT.quiesce();

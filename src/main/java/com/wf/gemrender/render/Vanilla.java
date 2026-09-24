@@ -122,7 +122,9 @@ public final class Vanilla {
         return Minecraft.getInstance()
                 .getTimer()
                 .getGameTimeDeltaPartialTick(false);
-        //?} else {
+        //?} else if fabric {
+        /*return Minecraft.getInstance().getFrameTime();
+        *///?} else {
         /*return Minecraft.getInstance().getPartialTick();
          *///?}
     }

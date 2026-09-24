@@ -1,5 +1,7 @@
 package com.wf.gemrender.gltf;
 
+import com.wf.gemrender.Ids;
+
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.wf.gemrender.GemRender;
@@ -315,7 +317,7 @@ public final class GltfImporter {
     }
 
     private static ResourceLocation atlasId(ResourceLocation source) {
-        return ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID,
+        return Ids.of(GemRender.MOD_ID,
                 "atlas/" + source.getNamespace() + "/" + source.getPath());
     }
 

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${mod_version}",
+  "name": "GemRender",
+  "description": "A GPU-driven model and animation renderer for Minecraft.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.wf.gemrender.GemRenderFabric"
+    ]
+  },
+  "mixins": [
+    ${mixin_configs}
+  ],
+  "depends": {
+    "fabricloader": ">=0.16",
+    "minecraft": "${minecraft_version_range}",
+    "java": ">=${java_version}",
+    "flywheel": "${flywheel_version_range}"
+  }
+}

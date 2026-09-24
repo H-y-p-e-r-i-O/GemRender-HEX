@@ -1,5 +1,7 @@
 package com.wf.gemrender.render;
 
+import com.wf.gemrender.Ids;
+
 import com.wf.gemrender.GemRender;
 import dev.engine_room.flywheel.api.instance.InstanceType;
 import dev.engine_room.flywheel.api.layout.FloatRepr;
@@ -49,6 +51,6 @@ public final class GemRenderInstanceTypes {
     }
 
     private static ResourceLocation shader(String path) {
-        return ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, path);
+        return Ids.of(GemRender.MOD_ID, path);
     }
 }

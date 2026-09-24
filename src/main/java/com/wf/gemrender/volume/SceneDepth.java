@@ -1,5 +1,7 @@
 package com.wf.gemrender.volume;
 
+import com.wf.gemrender.Ids;
+
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.GemRender;
@@ -70,7 +72,7 @@ public final class SceneDepth {
     }
 
     private static String resource(String path) throws IOException {
-        ResourceLocation location = ResourceLocation.fromNamespaceAndPath(GemRender.MOD_ID, path);
+        ResourceLocation location = Ids.of(GemRender.MOD_ID, path);
         try (InputStream in = Minecraft.getInstance()
                 .getResourceManager()
                 .open(location)) {
@@ -135,6 +137,7 @@ public final class SceneDepth {
         GlAudit.Scope audit = GlAudit.open("volume:depth");
         state.save();
         glGetIntegerv(GL_VIEWPORT, viewport);
+        int previousUnit = GlState.activeTexture();
 
         try {
             GlStateManager._glBindFramebuffer(GL_FRAMEBUFFER, fbo);
@@ -145,7 +148,7 @@ public final class SceneDepth {
 
             int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
             try {
-                glUseProgram(program);
+                GlStateManager._glUseProgram(program);
                 glUniform1f(znearLoc, Vanilla.zNear());
                 glUniform1f(zfarLoc, Vanilla.depthFar());
                 glUniform1i(depthLoc, 0);
@@ -162,10 +165,11 @@ public final class SceneDepth {
                     GlState.restoreSampler(0, borrowedSampler);
                 }
             } finally {
-                glUseProgram(previousProgram);
+                GlStateManager._glUseProgram(previousProgram);
             }
         } finally {
             GlStateManager._viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+            GlStateManager._activeTexture(previousUnit);
             state.restore();
             audit.close();
         }

@@ -3,6 +3,7 @@ package com.wf.gemrender.water;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.render.GlAudit;
+import com.wf.gemrender.render.LevelStage;
 import com.wf.gemrender.render.GlState;
 import com.wf.gemrender.render.Vanilla;
 import dev.engine_room.flywheel.backend.engine.indirect.OitFramebuffer;
@@ -14,12 +15,6 @@ import static org.lwjgl.opengl.GL30C.*;
 import static org.lwjgl.opengl.GL32C.glFramebufferTexture;
 import static org.lwjgl.opengl.GL33C.GL_TEXTURE_2D;
 import static org.lwjgl.opengl.GL33C.glTexImage2D;
-
-//? if neoforge {
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
-//?} else {
-/*import net.minecraftforge.client.event.RenderLevelStageEvent;
- *///?}
 
 public final class WaterSplit {
     private static final boolean ENABLED = !"false".equalsIgnoreCase(System.getProperty("gemrender.watersplit"));
@@ -92,7 +87,7 @@ public final class WaterSplit {
         return CLOUDS && WaterDepthPrepass.CLOUDS_SUPPORTED;
     }
 
-    public void onAfterEntities(RenderLevelStageEvent event) {
+    public void onAfterEntities(LevelStage stage) {
         oitDrawsLastFrame = oitDrawsThisFrame;
         oitDrawsThisFrame = false;
         prepassValid = false;
@@ -107,7 +102,7 @@ public final class WaterSplit {
         }
 
         prepassTimer.begin();
-        prepass.run(event, programs, cloudsFolded());
+        prepass.run(stage, programs, cloudsFolded());
         prepassTimer.end();
         prepassValid = true;
         cloudFrame = prepass.foldedClouds();
@@ -201,7 +196,7 @@ public final class WaterSplit {
         return true;
     }
 
-    public void onAfterTranslucent(RenderLevelStageEvent event) {
+    public void onAfterTranslucent() {
         if (prepass.isRendering() || !pendingFront) {
             return;
         }
@@ -215,7 +210,7 @@ public final class WaterSplit {
         lateTimer.end();
     }
 
-    public void onAfterWeather(RenderLevelStageEvent event) {
+    public void onAfterWeather() {
         if (prepass.isRendering() || !pendingLateFront) {
             return;
         }
@@ -229,6 +224,7 @@ public final class WaterSplit {
     private void drawFrontHalf(PassState passState, String auditName, boolean absorbance, boolean wavelet,
                                float cloudPhase) {
         GlAudit.Scope audit = GlAudit.open(auditName);
+        int entryTextureUnit = GlState.activeTexture();
         passState.save();
         try {
             Vanilla.bindWrite(Minecraft.getInstance()
@@ -255,7 +251,7 @@ public final class WaterSplit {
             }
         } finally {
             passState.restore();
-            GlStateManager._activeTexture(org.lwjgl.opengl.GL13C.GL_TEXTURE0);
+            GlStateManager._activeTexture(entryTextureUnit);
             audit.close();
         }
     }

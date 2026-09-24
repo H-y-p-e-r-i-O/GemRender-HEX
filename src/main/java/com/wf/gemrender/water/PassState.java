@@ -25,6 +25,8 @@ public final class PassState {
     private boolean deep;
     private int vertexArray;
     private int activeTexture;
+    private boolean cullFace;
+    private int arrayBuffer;
 
     public void save() {
         deep = false;
@@ -37,6 +39,8 @@ public final class PassState {
 
         vertexArray = glGetInteger(GL_VERTEX_ARRAY_BINDING);
         activeTexture = GlState.activeTexture();
+        cullFace = glGetInteger(GL_CULL_FACE) != 0;
+        arrayBuffer = glGetInteger(GL_ARRAY_BUFFER_BINDING);
         for (int i = 0; i < DEEP_UNITS.length; i++) {
             GlStateManager._activeTexture(GL_TEXTURE0 + DEEP_UNITS[i]);
             unitTexture[i] = glGetInteger(GL_TEXTURE_BINDING_2D);
@@ -89,6 +93,12 @@ public final class PassState {
         }
 
         GlStateManager._glBindVertexArray(vertexArray);
+        GlStateManager._glBindBuffer(GL_ARRAY_BUFFER, arrayBuffer);
+        if (cullFace) {
+            GlStateManager._enableCull();
+        } else {
+            GlStateManager._disableCull();
+        }
         for (int i = 0; i < DEEP_UNITS.length; i++) {
             GlStateManager._activeTexture(GL_TEXTURE0 + DEEP_UNITS[i]);
             GlStateManager._bindTexture(unitTexture[i]);
