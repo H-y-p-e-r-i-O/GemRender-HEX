@@ -34,8 +34,6 @@ public final class SkinnedBounds {
     }
 
     public void evaluate(Matrix4fc[] palette, Vector4f out) {
-        float[] posed = new float[3];
-
         float minX = Float.POSITIVE_INFINITY;
         float minY = Float.POSITIVE_INFINITY;
         float minZ = Float.POSITIVE_INFINITY;
@@ -45,14 +43,20 @@ public final class SkinnedBounds {
 
         for (int i = 0; i < slots.length; i++) {
             Matrix4fc bone = palette[slots[i]];
+            int b = i * FLOATS_PER_BOX;
             for (int corner = 0; corner < CORNERS; corner++) {
-                posedCorner(bone, i, corner, posed);
-                minX = Math.min(minX, posed[0]);
-                minY = Math.min(minY, posed[1]);
-                minZ = Math.min(minZ, posed[2]);
-                maxX = Math.max(maxX, posed[0]);
-                maxY = Math.max(maxY, posed[1]);
-                maxZ = Math.max(maxZ, posed[2]);
+                float x = boxes[b + ((corner & 1) != 0 ? 3 : 0)];
+                float y = boxes[b + 1 + ((corner & 2) != 0 ? 3 : 0)];
+                float z = boxes[b + 2 + ((corner & 4) != 0 ? 3 : 0)];
+                float px = bone.m00() * x + bone.m10() * y + bone.m20() * z + bone.m30();
+                float py = bone.m01() * x + bone.m11() * y + bone.m21() * z + bone.m31();
+                float pz = bone.m02() * x + bone.m12() * y + bone.m22() * z + bone.m32();
+                minX = Math.min(minX, px);
+                minY = Math.min(minY, py);
+                minZ = Math.min(minZ, pz);
+                maxX = Math.max(maxX, px);
+                maxY = Math.max(maxY, py);
+                maxZ = Math.max(maxZ, pz);
             }
         }
 
@@ -63,28 +67,19 @@ public final class SkinnedBounds {
         float radiusSq = 0.0f;
         for (int i = 0; i < slots.length; i++) {
             Matrix4fc bone = palette[slots[i]];
+            int b = i * FLOATS_PER_BOX;
             for (int corner = 0; corner < CORNERS; corner++) {
-                posedCorner(bone, i, corner, posed);
-                float dx = posed[0] - cx;
-                float dy = posed[1] - cy;
-                float dz = posed[2] - cz;
+                float x = boxes[b + ((corner & 1) != 0 ? 3 : 0)];
+                float y = boxes[b + 1 + ((corner & 2) != 0 ? 3 : 0)];
+                float z = boxes[b + 2 + ((corner & 4) != 0 ? 3 : 0)];
+                float dx = bone.m00() * x + bone.m10() * y + bone.m20() * z + bone.m30() - cx;
+                float dy = bone.m01() * x + bone.m11() * y + bone.m21() * z + bone.m31() - cy;
+                float dz = bone.m02() * x + bone.m12() * y + bone.m22() * z + bone.m32() - cz;
                 radiusSq = Math.max(radiusSq, dx * dx + dy * dy + dz * dz);
             }
         }
 
         out.set(cx, cy, cz, (float) Math.sqrt(radiusSq));
-    }
-
-    private void posedCorner(Matrix4fc bone, int i, int corner, float[] out) {
-        int b = i * FLOATS_PER_BOX;
-
-        float x = boxes[b + ((corner & 1) != 0 ? 3 : 0)];
-        float y = boxes[b + 1 + ((corner & 2) != 0 ? 3 : 0)];
-        float z = boxes[b + 2 + ((corner & 4) != 0 ? 3 : 0)];
-
-        out[0] = bone.m00() * x + bone.m10() * y + bone.m20() * z + bone.m30();
-        out[1] = bone.m01() * x + bone.m11() * y + bone.m21() * z + bone.m31();
-        out[2] = bone.m02() * x + bone.m12() * y + bone.m22() * z + bone.m32();
     }
 
     public static final class Builder {

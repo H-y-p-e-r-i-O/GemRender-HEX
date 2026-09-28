@@ -542,7 +542,8 @@ tasks.named('test', Test) {
     ['analysisModel'      : 'gemrender.analysis.model',
      'analysisAnimation'  : 'gemrender.analysis.animation',
      'analysisGameplay'   : 'gemrender.analysis.gameplayBones',
-     'analysisFleet'      : 'gemrender.analysis.fleet'].each { property, key ->
+     'analysisFleet'      : 'gemrender.analysis.fleet',
+     'blendBench'         : 'gemrender.bench.blend'].each { property, key ->
         if (project.hasProperty(property)) {
             systemProperty key, project.property(property).toString()
         }

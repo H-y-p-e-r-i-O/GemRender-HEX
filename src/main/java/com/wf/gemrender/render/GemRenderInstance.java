@@ -1,5 +1,6 @@
 package com.wf.gemrender.render;
 
+import com.wf.gemrender.texture.Paint;
 import com.wf.gemrender.texture.VariantUv;
 import dev.engine_room.flywheel.api.instance.InstanceHandle;
 import dev.engine_room.flywheel.api.instance.InstanceType;
@@ -28,6 +29,27 @@ public class GemRenderInstance extends ColoredLitInstance {
     public final Vector2f uvOffset = new Vector2f();
     public int boneBase = 0;
     public int morphBase = 0;
+    /**
+     * {@link #NO_JOINT_VARIANTS}, or the float offset of a {@link BoneBuffer#addFloatBlock} holding one
+     * {@code (u, v)} per joint: each vertex takes its dominant joint's offset instead of {@link #uvOffset}.
+     * Per-bone skins (damage, per-part paint) in one draw. Re-add every frame, like the palette.
+     */
+    public int jointUvBase = NO_JOINT_VARIANTS;
+    /**
+     * {@link Paint#layer}; -1 = unpainted. Only for a {@code paintable()} model; painted => tint rgb ignored.
+     */
+    public int paint = -1;
+    public float paintScale;
+    /**
+     * The model's {@code paintReference}.
+     */
+    public int paintReference;
+    /**
+     * {@link BoneBuffer#addSharedPalette} of the model's cached {@code restPalette()}, every frame like the palette.
+     */
+    public int paintRestBase;
+
+    public static final int NO_JOINT_VARIANTS = -1;
 
     public GemRenderInstance(InstanceType<? extends GemRenderInstance> type, InstanceHandle handle) {
         super(type, handle);
@@ -48,6 +70,25 @@ public class GemRenderInstance extends ColoredLitInstance {
      */
     public GemRenderInstance variant(VariantUv variant) {
         uvOffset.set(variant.u(), variant.v());
+        return this;
+    }
+
+    public GemRenderInstance jointVariants(int floatBase) {
+        this.jointUvBase = floatBase;
+        return this;
+    }
+
+    /**
+     * Pattern in rest-pose model space (moves with its part), triplanar; masked texels become
+     * {@code base * paint / reference}.
+     * {@link Paint#NONE} = authored look. Skip while {@link com.wf.gemrender.iris.ShaderPacks#inUse}: a pack
+     * drops the fragment stage that undoes the painted vertex outputs.
+     */
+    public GemRenderInstance paint(Paint paint, int reference, int restBase) {
+        this.paint = paint.layer();
+        this.paintScale = paint.tilesPerBlock();
+        this.paintReference = reference;
+        this.paintRestBase = restBase;
         return this;
     }
 

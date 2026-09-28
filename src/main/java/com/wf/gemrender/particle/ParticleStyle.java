@@ -1,7 +1,7 @@
 package com.wf.gemrender.particle;
 
 public final class ParticleStyle {
-    public static final int FLOATS = 20;
+    public static final int FLOATS = 24;
 
     public static final float FULL_BRIGHT = 240.0f / 256.0f;
 
@@ -24,6 +24,8 @@ public final class ParticleStyle {
     public final float restitution;
     public final float friction;
     public final ContactResponse response;
+    public final float fadeOut;
+    public final float streak;
 
     private final float[] data;
 
@@ -49,6 +51,8 @@ public final class ParticleStyle {
         friction = data[17];
         ContactResponse[] responses = ContactResponse.values();
         response = responses[Math.max(0, Math.min(responses.length - 1, (int) data[18]))];
+        fadeOut = data[19];
+        streak = data[20];
     }
 
     /** Whether a spawn through this style is worth sweeping for a contact at all. */
@@ -103,6 +107,8 @@ public final class ParticleStyle {
         private ContactResponse response = ContactResponse.NONE;
         private float restitution = 0.0f;
         private float friction = 0.0f;
+        private float fadeOut = 0.0f;
+        private float streak = 0.0f;
 
         private Builder() {
         }
@@ -121,6 +127,28 @@ public final class ParticleStyle {
 
         public Builder fadeIn(float unitAge) {
             fadeIn = unitAge;
+            return this;
+        }
+
+        /**
+         * Hold {@code alphaScale} until this unit age, then run the {@code alpha} falloff over the rest of the
+         * life. 0 fades over the whole life. {@link GemRenderParticleTypes#BODY} shrinks through the window
+         * instead.
+         */
+        public Builder fadeOut(float unitAge) {
+            if (!(unitAge >= 0.0f && unitAge < 1.0f)) {
+                throw new IllegalArgumentException("fadeOut is a unit age in [0, 1), got " + unitAge);
+            }
+            fadeOut = unitAge;
+            return this;
+        }
+
+        /**
+         * {@link GemRenderParticleTypes#STREAK} length: the distance covered in this many seconds at the
+         * particle's current speed, never shorter than its width.
+         */
+        public Builder streak(float seconds) {
+            streak = seconds;
             return this;
         }
 
@@ -207,7 +235,8 @@ public final class ParticleStyle {
                     tintRed, tintGreen, tintBlue, alphaScale,
                     alphaFalloff, coolFloor, coolSpan, spinRate,
                     lightBlock, lightSky, dragYSet ? dragY : drag, fadeIn,
-                    restitution, friction, response.ordinal(), 0.0f);
+                    restitution, friction, response.ordinal(), fadeOut,
+                    streak, 0.0f, 0.0f, 0.0f);
         }
     }
 }

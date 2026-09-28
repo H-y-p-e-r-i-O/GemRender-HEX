@@ -2,6 +2,7 @@ package com.wf.gemrender.render;
 
 import com.wf.gemrender.debug.SamplerProbe;
 import com.wf.gemrender.particle.ParticleBuffer;
+import com.wf.gemrender.texture.PaintArray;
 import com.wf.gemrender.volume.Volumetrics;
 
 public final class FrameUploads {
@@ -23,6 +24,7 @@ public final class FrameUploads {
                     .uploadAndBind();
             Volumetrics.getInstance()
                     .upload();
+            PaintArray.bind();
         } finally {
             audit.close();
         }

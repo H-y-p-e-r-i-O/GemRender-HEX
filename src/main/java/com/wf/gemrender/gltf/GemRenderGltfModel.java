@@ -14,14 +14,30 @@ import java.util.Map;
 
 /**
  * An imported asset: one Flywheel {@link Model}, plus its palette layout, bounds, morphs and clips.
+ *
+ * <p>{@code paintReference}: {@code 0xRRGGBB} the masked texels were painted in (coverage-weighted mean of
+ * the masks' rgb), or -1 = not paintable: no mask, or a mesh outside the PBR material, the only one that
+ * reads {@link com.wf.gemrender.render.GemRenderInstance#paint}. Painting a non-paintable model draws
+ * garbage.
  */
 public record GemRenderGltfModel(Model model, GltfPaletteLayout layout, SkinnedBounds bounds,
                                  GltfMorphLayout morphs, Map<String, GltfAnimation> animations,
                                  @Nullable ResourceLocation atlas,
-                                 List<ResourceLocation> textures, List<VariantUv> variants) {
+                                 List<ResourceLocation> textures, List<VariantUv> variants, int paintReference) {
     public GemRenderGltfModel {
         textures = List.copyOf(textures);
         variants = variants.isEmpty() ? List.of(VariantUv.NONE) : List.copyOf(variants);
+    }
+
+    public GemRenderGltfModel(Model model, GltfPaletteLayout layout, SkinnedBounds bounds,
+                              GltfMorphLayout morphs, Map<String, GltfAnimation> animations,
+                              @Nullable ResourceLocation atlas,
+                              List<ResourceLocation> textures, List<VariantUv> variants) {
+        this(model, layout, bounds, morphs, animations, atlas, textures, variants, -1);
+    }
+
+    public boolean paintable() {
+        return paintReference >= 0;
     }
 
     /**
@@ -51,6 +67,15 @@ public record GemRenderGltfModel(Model model, GltfPaletteLayout layout, SkinnedB
 
     public int jointCount() {
         return layout.size();
+    }
+
+    /**
+     * Palette at rest: pins paint to each part. New array per call; cache it.
+     */
+    public Matrix4f[] restPalette() {
+        Matrix4f[] rest = newPalette();
+        GltfPose.evaluate(layout, null, 0.0f, rest);
+        return rest;
     }
 
     public Matrix4f[] newPalette() {

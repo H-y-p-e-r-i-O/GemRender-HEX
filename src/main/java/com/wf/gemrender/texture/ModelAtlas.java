@@ -246,7 +246,8 @@ public final class ModelAtlas {
                     blocks.uncompressedBytes() / 1024, cached ? "read from the block cache" : "encoded",
                     millis);
             return true;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | LinkageError e) {
+            // LinkageError: libktx native absent (lwjgl-ktx natives not on the runtime), not a bad sheet.
             GemRender.LOGGER.warn("Could not compress {}, keeping it as RGBA8 ({})", atlasId, e.toString());
             return false;
         }

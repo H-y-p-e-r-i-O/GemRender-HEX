@@ -80,11 +80,10 @@ public final class SpikeHud {
 	public static void render(net.minecraft.client.gui.GuiGraphics graphics) {
 	//?}
 		List<String> what = lines;
-		if (what.isEmpty()) {
+		Minecraft mc = Minecraft.getInstance();
+		if (what.isEmpty() || mc.options.hideGui) {
 			return;
 		}
-
-		Minecraft mc = Minecraft.getInstance();
 
 		int width = mc.getWindow()
 				.getGuiScaledWidth();

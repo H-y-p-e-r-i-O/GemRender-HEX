@@ -76,6 +76,9 @@ if (project.hasProperty('spacing')) {
 if (project.hasProperty('direct')) {
     props.put 'gemrender.autodirect', project.property('direct').toString()
 }
+if (project.hasProperty('importList')) {
+    props.put 'gemrender.importlist', project.property('importList').toString()
+}
 if (project.hasProperty('directasset')) {
     props.put 'gemrender.directasset', project.property('directasset').toString()
 }
@@ -157,6 +160,15 @@ if (project.hasProperty('particleBlend')) {
     props.put 'gemrender.particleblend', project.property('particleBlend').toString()
 }
 
+if (project.hasProperty('particleKinds')) {
+    props.put 'gemrender.particlekinds', project.property('particleKinds').toString()
+}
+if (project.hasProperty('particleKindCount')) {
+    props.put 'gemrender.particlekindcount', project.property('particleKindCount').toString()
+}
+if (project.hasProperty('particleTime')) {
+    props.put 'gemrender.particletime', project.property('particleTime').toString()
+}
 if (project.hasProperty('particleSize')) {
     props.put 'gemrender.particlesize', project.property('particleSize').toString()
 }
@@ -394,6 +406,15 @@ if (project.hasProperty('morphUnit')) {
 }
 if (project.hasProperty('spikeExit')) {
     props.put 'gemrender.autoexit', project.property('spikeExit').toString()
+}
+
+['autoBlend' : 'gemrender.autoblend', 'blendAt': 'gemrender.blendat', 'blendFade': 'gemrender.blendfade', 'blendSpeed': 'gemrender.blendspeed',
+ 'blendA'    : 'gemrender.blenda', 'blendB': 'gemrender.blendb', 'blendNode': 'gemrender.blendnode',
+ 'blendAngle': 'gemrender.blendangle', 'blendCurve': 'gemrender.blendcurve',
+ 'directBlend': 'gemrender.directblend', 'blendDistance': 'gemrender.blenddistance', 'blendCell': 'gemrender.blendcell', 'blendRaise': 'gemrender.blendraise', 'blendAxis': 'gemrender.blendaxis', 'entityBlend': 'gemrender.entityblend'].each { property, key ->
+    if (project.hasProperty(property)) {
+        props.put key, project.property(property).toString()
+    }
 }
 
 if (project.hasProperty('freeze')) {

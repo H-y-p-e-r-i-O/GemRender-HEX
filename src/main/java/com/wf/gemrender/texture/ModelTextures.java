@@ -40,6 +40,24 @@ public final class ModelTextures {
         }
     }
 
+    /**
+     * {@code a/b.png} + {@code _x} -> {@code a/b_x.png} when that resource exists, else null.
+     */
+    @Nullable
+    public static ResourceLocation sibling(@Nullable ResourceLocation source, String suffix) {
+        if (source == null) {
+            return null;
+        }
+        String path = source.getPath();
+        int dot = path.lastIndexOf('.');
+        ResourceLocation candidate = source.withPath(dot < 0 ? path + suffix
+                : path.substring(0, dot) + suffix + path.substring(dot));
+        return Minecraft.getInstance()
+                .getResourceManager()
+                .getResource(candidate)
+                .isPresent() ? candidate : null;
+    }
+
     public static ResourceLocation materialTexture(ResourceLocation source,
                                                    List<ResourceLocation> owned) {
         if (!isKtx2(source)) {

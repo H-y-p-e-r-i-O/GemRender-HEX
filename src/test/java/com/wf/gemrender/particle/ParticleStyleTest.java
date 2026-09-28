@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class ParticleStyleTest {
 	@Test
-	@DisplayName("a style writes its twenty floats in the order the shader reads them")
+	@DisplayName("a style writes its twenty-four floats in the order the shader reads them")
 	void writesTheShaderLayout() {
 		ParticleStyle style = ParticleStyle.builder()
 				.drag(2.1f)
@@ -19,6 +19,8 @@ class ParticleStyleTest {
 				.cool(0.1f, 0.6f)
 				.spin(3.0f)
 				.light(0.9f, 0.8f)
+				.fadeOut(0.25f)
+				.streak(0.04f)
 				.build();
 
 		float[] target = new float[ParticleStyle.FLOATS * 2];
@@ -27,7 +29,33 @@ class ParticleStyleTest {
 		assertThat(target).startsWith(new float[ParticleStyle.FLOATS]);
 		assertThat(java.util.Arrays.copyOfRange(target, ParticleStyle.FLOATS, target.length))
 				.containsExactly(2.1f, 1.6f, 0.5f, 2.8f, 0.25f, 0.5f, 0.75f, 0.75f, 0.4f, 0.1f, 0.6f, 3.0f, 0.9f,
-						0.8f, 2.1f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+						0.8f, 2.1f, 0.0f, 0.0f, 0.0f, 0.0f, 0.25f, 0.04f, 0.0f, 0.0f, 0.0f);
+	}
+
+	@Test
+	@DisplayName("fadeOut holds full alpha until its unit age, then fades to zero by the end of life")
+	void fadeOutHoldsThenFades() {
+		ParticleStyle style = ParticleStyle.builder()
+				.alpha(0.8f, 1.0f)
+				.fadeOut(0.6f)
+				.build();
+
+		assertThat(ParticleMotion.alpha(style, 0.0f)).isEqualTo(0.8f);
+		assertThat(ParticleMotion.alpha(style, 0.59f)).isEqualTo(0.8f);
+		assertThat(ParticleMotion.alpha(style, 0.8f)).isCloseTo(0.4f, within(1e-5f));
+		assertThat(ParticleMotion.alpha(style, 1.0f)).isZero();
+	}
+
+	@Test
+	@DisplayName("fadeOut 0 is the old whole-life fade, value for value")
+	void fadeOutZeroIsUnchanged() {
+		ParticleStyle style = ParticleStyle.builder()
+				.alpha(0.7f, 0.5f)
+				.build();
+		for (float u = 0.0f; u <= 1.0f; u += 0.1f) {
+			assertThat(ParticleMotion.alpha(style, u))
+					.isEqualTo(Math.max(0.0f, Math.min(1.0f, 0.7f * (float) Math.pow(1.0f - u, 0.5f))));
+		}
 	}
 
 	@Test

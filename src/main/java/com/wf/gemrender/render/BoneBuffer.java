@@ -7,6 +7,8 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.FloatBuffer;
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 import static org.lwjgl.opengl.GL31C.*;
 import static org.lwjgl.opengl.GL33C.GL_ARRAY_BUFFER;
@@ -62,6 +64,13 @@ public final class BoneBuffer {
 
     private volatile int lastUploadedCount;
 
+    /** {@link #addSharedPalette} bases this frame; cleared with the staging. */
+    private final Map<Object, Integer> shared = new IdentityHashMap<>();
+
+    private volatile int lastSharedHits;
+
+    private int sharedHits;
+
     private BoneBuffer(int unit, String name) {
         this.unit = unit;
         this.name = name;
@@ -101,6 +110,34 @@ public final class BoneBuffer {
         }
     }
 
+    /**
+     * {@link #addPalette}, staged once per frame per array: later calls with the same array (identity) this
+     * frame return the first base. Contents MUST NOT change until the next upload. Rest palettes, anything
+     * many instances share.
+     */
+    public int addSharedPalette(Matrix4fc[] palette, int count) {
+        synchronized (stagingLock) {
+            Integer base = shared.get(palette);
+            if (base != null) {
+                sharedHits++;
+                return base;
+            }
+            int staged = addPalette(palette, count);
+            shared.put(palette, staged);
+            return staged;
+        }
+    }
+
+    /** {@link #addSharedPalette} calls answered without staging, last upload. */
+    public int lastSharedHits() {
+        return lastSharedHits;
+    }
+
+    /** Float offset of {@code block[0..length)}, matrix-aligned after. Morph deltas, per-joint UVs. */
+    public int addFloatBlock(float[] block, int length) {
+        return addMorphBlock(block, length);
+    }
+
     public int addMorphBlock(float[] block, int length) {
         synchronized (stagingLock) {
             ensureStagingCapacity(floatCount + length + FLOATS_PER_MATRIX);
@@ -134,6 +171,9 @@ public final class BoneBuffer {
         synchronized (stagingLock) {
             count = alignToMatrix(floatCount) / FLOATS_PER_MATRIX;
             floatCount = 0;
+            shared.clear();
+            lastSharedHits = sharedHits;
+            sharedHits = 0;
 
             if (count == 0) {
                 lastUploadedCount = 0;
@@ -226,7 +266,8 @@ public final class BoneBuffer {
             return;
         }
 
-        int newCapacity = Math.max(floats, INITIAL_MATRICES * FLOATS_PER_MATRIX);
+        int newCapacity = Math.max(floats, Math.max(INITIAL_MATRICES * FLOATS_PER_MATRIX,
+                staging == null ? 0 : staging.capacity() * 2));
         FloatBuffer grown = MemoryUtil.memAllocFloat(newCapacity);
         if (staging != null) {
             staging.position(0)
@@ -254,6 +295,7 @@ public final class BoneBuffer {
                 staging = null;
             }
             floatCount = 0;
+            shared.clear();
         }
     }
 }

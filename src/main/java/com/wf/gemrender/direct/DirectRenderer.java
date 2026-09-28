@@ -5,8 +5,13 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.wf.gemrender.gltf.GemRenderGltfModel;
 import com.wf.gemrender.gltf.GltfAnimation;
 import com.wf.gemrender.gltf.GltfPose;
+import com.wf.gemrender.gltf.blend.AnimationBlend;
+import com.wf.gemrender.gltf.blend.BlendKey;
+import com.wf.gemrender.render.PoseCache;
 import com.wf.gemrender.render.BoneBuffer;
 import com.wf.gemrender.render.MorphBuffer;
+import com.wf.gemrender.texture.Paint;
+import com.wf.gemrender.texture.PaintArray;
 import com.wf.gemrender.texture.VariantUv;
 import com.wf.gemrender.water.PassState;
 import org.jetbrains.annotations.Nullable;
@@ -35,6 +40,10 @@ public final class DirectRenderer {
     private static final PassState PASS_STATE = new PassState();
 
     private static final GltfPose.Scratch SCRATCH = new GltfPose.Scratch();
+
+    private static final BlendKey BLEND_PROBE = new BlendKey();
+
+    private static final AnimationBlend BLEND_LOADED = new AnimationBlend();
 
     private static boolean guiQueued;
 
@@ -92,6 +101,63 @@ public final class DirectRenderer {
         DirectStats.submitEnd(queued);
     }
 
+    /**
+     * A blended pose; one evaluation per distinct quantized blend per pass, as the single-clip form
+     * shares per (clip, instant).
+     */
+    public static void submit(GemRenderGltfModel model, AnimationBlend blend, Matrix4f pose, int light,
+                              int overlay, int argb, DirectPass pass, VariantUv variant) {
+        BLEND_PROBE.set(model, 0, blend, QUANTUM_SECONDS, PoseCache.weightSteps(0));
+        if (BLEND_PROBE.isSingleClip() || BLEND_PROBE.isRest()) {
+            GltfAnimation clip = BLEND_PROBE.isRest() ? null : BLEND_PROBE.clip(0);
+            submit(model, clip, clip == null ? 0.0f : BLEND_PROBE.time(0), pose, light, overlay, argb, pass,
+                    variant);
+            return;
+        }
+        RenderSystem.assertOnRenderThread();
+
+        if (!DirectProgram.getInstance()
+                .ensureCreated()) {
+            return;
+        }
+
+        ResidentModel resident = ResidentModels.get(model);
+        if (resident == null || resident.parts()
+                .isEmpty()) {
+            return;
+        }
+
+        DirectPass queued = queueFor(pass);
+        DirectStats.submitBegin();
+        guiQueued |= queued == DirectPass.GUI;
+
+        PassQueue queue = QUEUES.computeIfAbsent(queued, key -> new PassQueue());
+        boolean shared = !BLEND_PROBE.isPrivate();
+        PaletteSlot slot = shared ? queue.blendPalettes.get(BLEND_PROBE) : null;
+        if (slot != null) {
+            DirectStats.palette(queued, true);
+        } else {
+            DirectStats.palette(queued, false);
+            Matrix4f[] palette = SCRATCH.palette(model.jointCount());
+            float[] morphBlock = model.morphs()
+                    .isEmpty() ? null : SCRATCH.morphBlock(model.morphs()
+                    .blockFloats());
+            BLEND_PROBE.load(BLEND_LOADED);
+            GltfPose.evaluate(model.layout(), BLEND_LOADED, palette, model.morphs(), morphBlock, SCRATCH);
+            slot = stage(model, palette, morphBlock);
+            if (shared) {
+                queue.blendPalettes.put(BLEND_PROBE.copy(), slot);
+            }
+        }
+
+        for (ResidentModel.Part part : resident.parts()) {
+            Batch batch = queue.batch(part);
+            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant);
+        }
+
+        DirectStats.submitEnd(queued);
+    }
+
     public static void submit(GemRenderGltfModel model, float[] state, Matrix4f pose, int light,
                               int overlay, int argb, DirectPass pass) {
         submit(model, state, pose, light, overlay, argb, pass, VariantUv.NONE);
@@ -129,6 +195,45 @@ public final class DirectRenderer {
         for (ResidentModel.Part part : resident.parts()) {
             Batch batch = queue.batch(part);
             write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant);
+        }
+
+        DirectStats.submitEnd(queued);
+    }
+
+    /**
+     * A palette the caller already posed (e.g. a world visual's), painted like
+     * {@link com.wf.gemrender.render.GemRenderInstance#paint}. {@code paint} only on a {@code paintable()} model;
+     * {@code restPalette} = its {@code restPalette()}, ignored unpainted.
+     */
+    public static void submit(GemRenderGltfModel model, Matrix4f[] palette, @Nullable float[] morphBlock,
+                              Matrix4f pose, int light, int overlay, int argb, DirectPass pass, VariantUv variant,
+                              Paint paint, int reference, Matrix4f[] restPalette) {
+        RenderSystem.assertOnRenderThread();
+
+        if (!DirectProgram.getInstance()
+                .ensureCreated()) {
+            return;
+        }
+
+        ResidentModel resident = ResidentModels.get(model);
+        if (resident == null || resident.parts()
+                .isEmpty()) {
+            return;
+        }
+
+        DirectPass queued = queueFor(pass);
+        DirectStats.submitBegin();
+        guiQueued |= queued == DirectPass.GUI;
+
+        PassQueue queue = QUEUES.computeIfAbsent(queued, key -> new PassQueue());
+        PaletteSlot slot = stage(model, palette, morphBlock);
+        int restBase = paint.isNone() ? 0 : BoneBuffer.direct()
+                .addSharedPalette(restPalette, model.jointCount());
+        DirectStats.palette(queued, false);
+
+        for (ResidentModel.Part part : resident.parts()) {
+            Batch batch = queue.batch(part);
+            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant, paint, reference, restBase);
         }
 
         DirectStats.submitEnd(queued);
@@ -172,6 +277,11 @@ public final class DirectRenderer {
 
     private static void write(Batch batch, int offset, Matrix4f pose, PaletteSlot slot, int light,
                               int overlay, int argb, VariantUv variant) {
+        write(batch, offset, pose, slot, light, overlay, argb, variant, Paint.NONE, 0, 0);
+    }
+
+    private static void write(Batch batch, int offset, Matrix4f pose, PaletteSlot slot, int light,
+                              int overlay, int argb, VariantUv variant, Paint paint, int reference, int restBase) {
         ByteBuffer buffer = batch.instances;
         long address = MemoryUtil.memAddress(buffer) + offset;
 
@@ -193,6 +303,12 @@ public final class DirectRenderer {
 
         MemoryUtil.memPutFloat(address + 92, variant.u());
         MemoryUtil.memPutFloat(address + 96, variant.v());
+
+        // reference, restBase < 2^24: exact as floats.
+        MemoryUtil.memPutFloat(address + 100, paint.layer());
+        MemoryUtil.memPutFloat(address + 104, paint.tilesPerBlock());
+        MemoryUtil.memPutFloat(address + 108, reference);
+        MemoryUtil.memPutFloat(address + 112, restBase);
     }
 
     private static DirectPass queueFor(DirectPass pass) {
@@ -284,6 +400,7 @@ public final class DirectRenderer {
                     .uploadAndBind();
             MorphBuffer.getInstance()
                     .bind();
+            PaintArray.bind();
 
             program.use();
             program.matrices(new Matrix4f(RenderSystem.getModelViewMatrix()),
@@ -301,7 +418,7 @@ public final class DirectRenderer {
             instancesLastFlush = 0;
             drawPile(queue, program, false);
             drawPile(queue, program, true);
-            palettesLastFlush = queue.palettes.size();
+            palettesLastFlush = queue.palettes.size() + queue.blendPalettes.size();
         } finally {
             DirectVanilla.unbindTextures(UNIT_ATLAS, UNIT_OVERLAY, UNIT_LIGHTMAP);
 
@@ -369,6 +486,7 @@ public final class DirectRenderer {
             queue.order.clear();
             queue.batches.clear();
             queue.palettes.clear();
+            queue.blendPalettes.clear();
         }
         QUEUES.clear();
     }
@@ -424,6 +542,8 @@ public final class DirectRenderer {
 
         private final Map<PaletteKey, PaletteSlot> palettes = new HashMap<>();
 
+        private final Map<BlendKey, PaletteSlot> blendPalettes = new HashMap<>();
+
         Batch batch(ResidentModel.Part part) {
             Batch batch = batches.get(part);
             if (batch == null) {
@@ -448,6 +568,7 @@ public final class DirectRenderer {
                 batch.reset();
             }
             palettes.clear();
+            blendPalettes.clear();
         }
     }
 

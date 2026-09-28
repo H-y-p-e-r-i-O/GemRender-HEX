@@ -4,12 +4,15 @@ import com.wf.gemrender.gltf.GltfAnimation;
 import com.wf.gemrender.gltf.GltfPaletteLayout;
 import com.wf.gemrender.gltf.GltfPose;
 import com.wf.gemrender.gltf.NodeTable;
+import com.wf.gemrender.gltf.blend.AnimationBlend;
+import com.wf.gemrender.gltf.blend.BlendKey;
 import com.wf.gemrender.gltf.morph.GltfMorphLayout;
 import com.wf.gemrender.gltf.skin.SkinnedBounds;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
 import org.joml.Vector4fc;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
@@ -29,6 +32,7 @@ public final class PoseCache {
                     Float.toString(DEFAULT_QUANTUM_SECONDS))));
     private final float quantumSeconds;
     private final Map<Key, Pose> poses = new ConcurrentHashMap<>();
+    private final Map<BlendKey, Pose> blended = new ConcurrentHashMap<>();
     /**
      * Palettes, by size, reused frame to frame.
      *
@@ -49,6 +53,8 @@ public final class PoseCache {
     private volatile int evaluationsLastFrame;
     private volatile int lodSumLastFrame;
     private volatile int lodMaxLastFrame;
+    private volatile int frame;
+
     PoseCache(float quantumSeconds) {
         this.quantumSeconds = quantumSeconds;
     }
@@ -126,6 +132,59 @@ public final class PoseCache {
         return pose(layout, bounds, morphs, clips, buckets, clips.length, lod, thread);
     }
 
+    /**
+     * A blended pose. Keyed like the single-clip form with each layer's weight quantized to
+     * {@link #weightSteps(int)}; layers quantizing to zero weight drop out, and what is left of one
+     * full-weight unmasked clip is the single-clip key, shared with callers of the single-clip API.
+     * A blend carrying a {@code Crossfade}'s inertialization is private to its instance.
+     */
+    public Pose pose(GltfPaletteLayout layout, SkinnedBounds bounds, GltfMorphLayout morphs, AnimationBlend blend,
+                     int lod) {
+        Local thread = local.get();
+        BlendKey probe = thread.blendProbe.set(layout, lod, blend, quantumSeconds(lod), weightSteps(lod));
+        if (probe.isSingleClip()) {
+            return pose(layout, bounds, morphs, probe.clip(0), probe.time(0), lod);
+        }
+        if (probe.isRest()) {
+            return pose(layout, bounds, morphs, (GltfAnimation) null, 0.0f, lod);
+        }
+
+        requests.incrementAndGet();
+        lodSum.addAndGet(lod);
+        lodMax.accumulateAndGet(lod, Math::max);
+
+        if (probe.isPrivate()) {
+            return evaluate(probe, layout, bounds, morphs, thread, thread.privatePose(layout.size(), frame));
+        }
+        Pose hit = blended.get(probe);
+        if (hit != null) {
+            return hit;
+        }
+        return blended.computeIfAbsent(probe.copy(), key -> evaluate(key, layout, bounds, morphs, thread,
+                new Pose(borrowPalette(layout.size()))));
+    }
+
+    /**
+     * Weight resolution at {@code lod}: 256 steps near, one octave coarser per level, never below 16.
+     */
+    public static int weightSteps(int lod) {
+        return Math.max(16, 256 >> Math.max(0, lod));
+    }
+
+    private Pose evaluate(BlendKey key, GltfPaletteLayout layout, SkinnedBounds bounds, GltfMorphLayout morphs,
+                          Local thread, Pose into) {
+        evaluations.incrementAndGet();
+        long startNanos = System.nanoTime();
+
+        GltfPose.Scratch scratch = thread.scratch;
+        float[] morphBlock = morphs.isEmpty() ? null : scratch.morphBlock(morphs.blockFloats());
+
+        key.load(thread.loaded);
+        GltfPose.evaluate(layout, thread.loaded, into.palette, morphs, morphBlock, scratch);
+
+        return publish(into, layout, bounds, morphs, morphBlock, startNanos);
+    }
+
     private Pose pose(GltfPaletteLayout layout, SkinnedBounds bounds, GltfMorphLayout morphs,
                       GltfAnimation[] clips, int[] buckets, int layers, int lod, Local thread) {
         requests.incrementAndGet();
@@ -147,11 +206,9 @@ public final class PoseCache {
         long startNanos = System.nanoTime();
 
         GltfPose.Scratch scratch = thread.scratch;
-        int size = key.layout.size();
-        Matrix4f[] palette = borrowPalette(size);
+        Matrix4f[] palette = borrowPalette(key.layout.size());
 
-        int morphFloats = morphs.blockFloats();
-        float[] morphBlock = morphs.isEmpty() ? null : scratch.morphBlock(morphFloats);
+        float[] morphBlock = morphs.isEmpty() ? null : scratch.morphBlock(morphs.blockFloats());
 
         float[] times = thread.times(key.layers);
         for (int layer = 0; layer < key.layers; layer++) {
@@ -160,19 +217,24 @@ public final class PoseCache {
 
         GltfPose.evaluate(key.layout, key.clips, times, palette, morphs, morphBlock, scratch);
 
-        Vector4f sphere = new Vector4f();
-        bounds.evaluate(palette, sphere);
+        return publish(new Pose(palette), key.layout, bounds, morphs, morphBlock, startNanos);
+    }
 
-        int boneBase = BoneBuffer.getInstance()
-                .addPalette(palette, size);
-        int morphBase = morphBlock == null ? 0
+    private Pose publish(Pose pose, GltfPaletteLayout layout, SkinnedBounds bounds, GltfMorphLayout morphs,
+                         float[] morphBlock, long startNanos) {
+        bounds.evaluate(pose.palette, pose.sphere);
+
+        pose.boneBase = BoneBuffer.getInstance()
+                .addPalette(pose.palette, layout.size());
+        pose.morphBase = morphBlock == null ? 0
                 : BoneBuffer.getInstance()
-                .addMorphBlock(morphBlock, morphFloats);
+                .addMorphBlock(morphBlock, morphs.blockFloats());
+        pose.layout = layout;
 
         FrameCost.getInstance()
                 .addPoseNanos(System.nanoTime() - startNanos);
 
-        return new Pose(boneBase, morphBase, sphere, key.layout, palette);
+        return pose;
     }
 
     /**
@@ -202,7 +264,13 @@ public final class PoseCache {
             palettes.computeIfAbsent(pose.palette.length, ignored -> new ConcurrentLinkedQueue<>())
                     .add(pose.palette);
         }
+        for (Pose pose : blended.values()) {
+            palettes.computeIfAbsent(pose.palette.length, ignored -> new ConcurrentLinkedQueue<>())
+                    .add(pose.palette);
+        }
         poses.clear();
+        blended.clear();
+        frame++;
         requestsLastFrame = requests.getAndSet(0);
         evaluationsLastFrame = evaluations.getAndSet(0);
         lodSumLastFrame = lodSum.getAndSet(0);
@@ -249,18 +317,13 @@ public final class PoseCache {
      * that array next. Ask again rather than keeping one.
      */
     public static final class Pose {
-        private final int boneBase;
-        private final int morphBase;
-        private final Vector4fc sphere;
-        private final GltfPaletteLayout layout;
+        private final Vector4f sphere = new Vector4f();
         private final Matrix4f[] palette;
+        private int boneBase;
+        private int morphBase;
+        private GltfPaletteLayout layout;
 
-        private Pose(int boneBase, int morphBase, Vector4fc sphere, GltfPaletteLayout layout,
-                     Matrix4f[] palette) {
-            this.boneBase = boneBase;
-            this.morphBase = morphBase;
-            this.sphere = sphere;
-            this.layout = layout;
+        private Pose(Matrix4f[] palette) {
             this.palette = palette;
         }
 
@@ -383,6 +446,8 @@ public final class PoseCache {
 
     private static final class Local {
         private final Key probe = new Key();
+        private final BlendKey blendProbe = new BlendKey();
+        private final AnimationBlend loaded = new AnimationBlend();
         private final GltfPose.Scratch scratch = new GltfPose.Scratch();
 
         /**
@@ -393,6 +458,41 @@ public final class PoseCache {
 
         private int[] buckets = new int[4];
         private float[] times = new float[4];
+
+        /**
+         * Private (inertialized) poses: never keyed, recycled per thread once the frame they were drawn in ends.
+         */
+        private final ArrayList<Pose> privateLive = new ArrayList<>();
+        private final ArrayList<Pose> privateFree = new ArrayList<>();
+        private int privateFrame = -1;
+
+        private Pose privatePose(int size, int frame) {
+            if (privateFrame != frame) {
+                privateFrame = frame;
+                for (int i = 0, n = privateLive.size(); i < n; i++) {
+                    privateFree.add(privateLive.get(i));
+                }
+                privateLive.clear();
+            }
+            Pose pose = null;
+            for (int i = privateFree.size() - 1; i >= 0; i--) {
+                if (privateFree.get(i).palette.length == size) {
+                    int last = privateFree.size() - 1;
+                    pose = privateFree.set(i, privateFree.get(last));
+                    privateFree.remove(last);
+                    break;
+                }
+            }
+            if (pose == null) {
+                Matrix4f[] palette = new Matrix4f[size];
+                for (int i = 0; i < size; i++) {
+                    palette[i] = new Matrix4f();
+                }
+                pose = new Pose(palette);
+            }
+            privateLive.add(pose);
+            return pose;
+        }
 
         private int[] buckets(int layers) {
             if (buckets.length < layers) {

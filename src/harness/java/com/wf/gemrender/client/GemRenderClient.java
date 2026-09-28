@@ -25,6 +25,7 @@ import com.wf.gemrender.particle.ParticleBuffer;
 import com.wf.gemrender.spike.RopeSpikeEffect;
 import com.wf.gemrender.particle.ParticleClock;
 import com.wf.gemrender.spike.ParticleSpikeEffect;
+import com.wf.gemrender.spike.ParticleKindsEffect;
 import com.wf.gemrender.spike.PartsEffect;
 import com.wf.gemrender.spike.SpikeAssets;
 import com.wf.gemrender.spike.SpikeEntityVisual;
@@ -75,6 +76,15 @@ public final class GemRenderClient {
 
 	private static final int AUTO_PARTICLES = Integer.getInteger("gemrender.autoparticles", 0);
 
+	@Nullable
+	private static ParticleKindsEffect kinds;
+
+	private static long kindsFpsSum;
+
+	private static int kindsFpsSamples;
+
+	private static final int PARTICLE_TIME = Integer.getInteger("gemrender.particletime", -1);
+
 	private static final int AUTO_VOLUMES = Integer.getInteger("gemrender.autovolumes", 0);
 
 	private static final int AUTO_ROPES = Integer.getInteger("gemrender.autoropes", 0);
@@ -89,6 +99,8 @@ public final class GemRenderClient {
 	private static final int AUTO_EXIT_TICKS = Integer.getInteger("gemrender.autoexit", 0);
 
 	private static final int AUTO_RADAR = Integer.getInteger("gemrender.autoradar", 0);
+
+	private static final String AUTO_BLEND = System.getProperty("gemrender.autoblend", "");
 
 	private static final int AUTO_RIG = Integer.getInteger("gemrender.autorig", 0);
 
@@ -334,7 +346,7 @@ public final class GemRenderClient {
 	private static boolean autoAssetLoaded() {
 		ResourceLocation asset = autoAsset();
 		if (asset == null) {
-			return true;
+			return ParticleKindsEffect.ready();
 		}
 		return autoIsParts() ? SpikeAssets.parts(asset) != null : SpikeAssets.model(asset) != null;
 	}
@@ -355,6 +367,9 @@ public final class GemRenderClient {
 	}
 
 	private static ResourceLocation autoAsset() {
+		if (!AUTO_BLEND.isEmpty()) {
+			return com.wf.gemrender.Ids.parse(AUTO_BLEND);
+		}
 		if (AUTO_VEHICLE_PARTS > 0 || AUTO_VEHICLE > 0) {
 			return SpikeAssets.vehicle(AUTO_VEHICLE_NAME);
 		}
@@ -383,6 +398,9 @@ public final class GemRenderClient {
 	}
 
 	private static int autoCount() {
+		if (!AUTO_BLEND.isEmpty()) {
+			return com.wf.gemrender.spike.BlendVisual.COPIES;
+		}
 		if (AUTO_VEHICLE_PARTS > 0) {
 			return AUTO_VEHICLE_PARTS;
 		}
@@ -409,6 +427,9 @@ public final class GemRenderClient {
 		}
 		if (AUTO_RADAR > 0) {
 			return AUTO_RADAR;
+		}
+		if (ParticleKindsEffect.wanted()) {
+			return Math.max(1, ParticleKindsEffect.COUNT);
 		}
 		if (AUTO_PARTICLES > 0) {
 			return AUTO_PARTICLES;
@@ -481,6 +502,7 @@ public final class GemRenderClient {
 	*///?}
 
 	public static void tick() {
+		com.wf.gemrender.spike.ImportSpike.tick();
 		if (autoCount() <= 0) {
 			return;
 		}
@@ -565,10 +587,14 @@ public final class GemRenderClient {
 			*///?}
 			connection.sendCommand("time set noon");
 			connection.sendCommand("weather clear");
+			if (ParticleKindsEffect.wanted()) {
+				// Saved spike world keeps other modes' invisible stands; spectator draws them translucent.
+				connection.sendCommand("kill @e[type=minecraft:armor_stand]");
+			}
 
 			float extent = asset != null
 					? GltfVisual.gridExtentOf(autoSphere(), autoCount())
-					: AUTO_PARTICLES > 0 ? PARTICLE_EXTENT
+					: AUTO_PARTICLES > 0 || ParticleKindsEffect.wanted() ? PARTICLE_EXTENT
 							: AUTO_VOLUMES > 0
 									? com.wf.gemrender.spike.VolumeSpikeEffect.SIZE * 2.0f
 									: AUTO_ROPES > 0
@@ -598,10 +624,15 @@ public final class GemRenderClient {
 				buildVanillaControls(connection, origin, asset);
 			}
 
+			if (ParticleKindsEffect.wanted()) {
+				buildParticleKindsBench(connection, origin);
+			}
+
 			// Ropes are laid out in a row like the particle emitters are, so the camera squares up to
 			// them rather than looking along the row from its corner.
 			boolean particleRow =
-					asset == null && (AUTO_PARTICLES > 0 || AUTO_VOLUMES > 0 || AUTO_ROPES > 0);
+					asset == null && (AUTO_PARTICLES > 0 || AUTO_VOLUMES > 0 || AUTO_ROPES > 0
+							|| ParticleKindsEffect.wanted());
 			connection.sendCommand(particleRow
 					? String.format(java.util.Locale.ROOT, "tp @s %d %d %d %d %d",
 							origin.getX(), origin.getY() + up, origin.getZ() - back, AUTO_YAW, AUTO_PITCH)
@@ -695,7 +726,18 @@ public final class GemRenderClient {
 			GemRender.LOGGER.info("Auto-spike: flushed void world '{}' to disk.", MAKE_WORLD);
 		}
 
+		if (kinds != null) {
+			kinds.emit();
+			if (ticksSinceSpike >= AUTO_EXIT_TICKS / 2) {
+				kindsFpsSum += mc.getFps();
+				kindsFpsSamples++;
+			}
+		}
+
 		if (++ticksSinceSpike == AUTO_EXIT_TICKS / 2) {
+			if (kinds != null) {
+				kinds.resetRun();
+			}
 			FrameCost.getInstance()
 					.resetRun();
 			ParticleBuffer.getInstance()
@@ -827,6 +869,24 @@ public final class GemRenderClient {
 				GemRender.LOGGER.info("{}-DIRECT{}", VERDICT_PREFIX, direct);
 			}
 			//?}
+
+			if (!AUTO_BLEND.isEmpty()) {
+				GemRender.LOGGER.info("{}-BLEND {}", VERDICT_PREFIX, com.wf.gemrender.spike.BlendVisual.verdict());
+			}
+
+			if (ParticleKindsEffect.wanted()) {
+				GemRender.LOGGER.info("{}-KINDS mc={} kinds={} countPerKind={} alive={} slots={} emitUsPerTick={} "
+								+ "meanFps={} fpsSamples={} time={}", VERDICT_PREFIX, BUILD_VERSION,
+						kinds == null ? "none" : kinds.kindList(), ParticleKindsEffect.COUNT,
+						ParticleBuffer.getInstance()
+								.aliveCount(ParticleClock.seconds()),
+						ParticleBuffer.getInstance()
+								.capacitySlots(),
+						kinds == null ? 0.0 : String.format(java.util.Locale.ROOT, "%.1f", kinds.meanEmitMicros()),
+						kindsFpsSamples == 0 ? 0 : String.format(java.util.Locale.ROOT, "%.1f",
+								kindsFpsSum / (double) kindsFpsSamples),
+						kindsFpsSamples, PARTICLE_TIME);
+			}
 
 			if (AUTO_ENTITY) {
 				GemRender.LOGGER.info("{}-ENTITY entityVisuals={} entityLive={} entityFrames={} "
@@ -1176,6 +1236,40 @@ public final class GemRenderClient {
 
 	private static final int WATER_MARGIN = 24;
 
+	/** Leftover entities killed; floor, per-column wall, iron under the sparks. */
+	private static void buildParticleKindsBench(net.minecraft.client.multiplayer.ClientPacketListener connection,
+			BlockPos origin) {
+		java.util.List<ParticleKindsEffect.Kind> list = ParticleKindsEffect.kinds();
+		int n = Math.max(1, list.size());
+		int half = (n + 1) * ParticleKindsEffect.SPACING / 2 + 2;
+		int x0 = origin.getX() - half;
+		int x1 = origin.getX() + half;
+		int y = origin.getY();
+		int z = origin.getZ();
+		stage(connection, String.format(java.util.Locale.ROOT,
+				"kill @e[type=!minecraft:player,x=%d,y=%d,z=%d,distance=..48]", origin.getX(), y, z));
+		stage(connection, String.format(java.util.Locale.ROOT, "fill %d %d %d %d %d %d minecraft:smooth_stone",
+				x0, y - 1, z - 10, x1, y - 1, z + ParticleKindsEffect.WALL));
+		for (int i = 0; i < list.size(); i++) {
+			int column = origin.getX() + Math.round((i - (list.size() - 1) / 2.0f) * ParticleKindsEffect.SPACING);
+			String wall = ParticleKindsEffect.WALL_BLOCKS[i % ParticleKindsEffect.WALL_BLOCKS.length];
+			stage(connection, String.format(java.util.Locale.ROOT, "fill %d %d %d %d %d %d %s",
+					column - 1, y - 1, z + ParticleKindsEffect.WALL, column + 1, y + 3,
+					z + ParticleKindsEffect.WALL, wall));
+			if (list.get(i) == ParticleKindsEffect.Kind.SPARK) {
+				stage(connection, String.format(java.util.Locale.ROOT,
+						"fill %d %d %d %d %d %d minecraft:iron_block", column - 1, y - 1, z - 1, column + 1, y - 1,
+						z + 1));
+			}
+		}
+		if (PARTICLE_TIME >= 0) {
+			stage(connection, "time set " + PARTICLE_TIME);
+		}
+		Minecraft.getInstance().options.hideGui = true;
+		GemRender.LOGGER.info("Auto-spike: particle kinds {} x {} at {}", list, ParticleKindsEffect.COUNT,
+				origin.toShortString());
+	}
+
 	private static int autoSpinNode(ResourceLocation asset) {
 		if (AUTO_SPIN_BONE.isEmpty()) {
 			return AUTO_SPIN_NODE;
@@ -1194,7 +1288,11 @@ public final class GemRenderClient {
 
 	private static void queueScene(Level level, BlockPos origin) {
 		ResourceLocation asset = autoAsset();
-		if (asset != null && autoIsParts()) {
+		if (asset != null && !AUTO_BLEND.isEmpty()) {
+			VisualizationManager.getOrThrow(level)
+					.effects()
+					.queueAdd(new com.wf.gemrender.spike.BlendEffect(level, origin, asset));
+		} else if (asset != null && autoIsParts()) {
 			VisualizationManager.getOrThrow(level)
 					.effects()
 					.queueAdd(new PartsEffect(level, origin, asset, autoCount(),
@@ -1209,7 +1307,7 @@ public final class GemRenderClient {
 					.queueAdd(new GltfEffect(level, origin, asset, autoCount(),
 							System.getProperty("gemrender.autoanimation", "running_loop"), AUTO_SYNC, 1.0f,
 							AUTO_SPIN, spinNode, AUTO_SPIN_DUTY));
-		} else if (AUTO_PARTICLES == 0 && AUTO_VOLUMES == 0 && AUTO_ROPES == 0) {
+		} else if (AUTO_PARTICLES == 0 && AUTO_VOLUMES == 0 && AUTO_ROPES == 0 && !ParticleKindsEffect.wanted()) {
 			VisualizationManager.getOrThrow(level)
 					.effects()
 					.queueAdd(new SpikeEffect(level, origin, AUTO_SPIKE));
@@ -1219,6 +1317,13 @@ public final class GemRenderClient {
 			VisualizationManager.getOrThrow(level)
 					.effects()
 					.queueAdd(new ParticleSpikeEffect(level, origin, AUTO_PARTICLES));
+		}
+
+		if (ParticleKindsEffect.wanted()) {
+			kinds = new ParticleKindsEffect((net.minecraft.client.multiplayer.ClientLevel) level, origin);
+			VisualizationManager.getOrThrow(level)
+					.effects()
+					.queueAdd(kinds);
 		}
 
 		if (AUTO_VOLUMES > 0) {

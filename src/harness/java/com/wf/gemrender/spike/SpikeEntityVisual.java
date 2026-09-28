@@ -93,6 +93,31 @@ public final class SpikeEntityVisual extends GemRenderEntityVisual<Entity> {
 		}
 	}
 
+	private static final boolean BLEND = Boolean.getBoolean("gemrender.entityblend");
+
+	private float blendTimeB = -1.0f;
+
+	/**
+	 * {@code -PentityBlend=true}: entity {@code id % 5} holds a fixed blend weight {@code 0, .25 .. 1} between
+	 * the clip's first frame and its farthest one.
+	 */
+	@Override
+	protected boolean blend(float partialTick, com.wf.gemrender.gltf.blend.AnimationBlend blend) {
+		GemRenderGltfModel model = model();
+		if (!BLEND || model == null) {
+			return false;
+		}
+		GltfAnimation clip = model.animationOrAny(clipName);
+		if (blendTimeB < 0.0f) {
+			blendTimeB = BlendVisual.farthestFrom(model.layout()
+					.nodeTable(), clip, 0.0f);
+		}
+		float w = (entity.getId() % 5) / 4.0f;
+		blend.override(clip, 0.0f, 1.0f - w);
+		blend.override(clip, blendTimeB, w);
+		return true;
+	}
+
 	@Override
 	protected void animate(float partialTick, GltfAnimation[] clips, float[] times) {
 		GemRenderGltfModel model = model();

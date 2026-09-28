@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.gltf.GemRenderGltfModel;
 import com.wf.gemrender.gltf.GltfAnimation;
+import com.wf.gemrender.gltf.blend.AnimationBlend;
 import com.wf.gemrender.render.Vanilla;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
@@ -106,6 +107,8 @@ public class GemRenderItemRenderer extends BlockEntityWithoutLevelRenderer {
     private static final Map<ResourceLocation, GemRenderItemRenderer> REGISTRY = new HashMap<>();
 
     private final ItemAppearance appearance;
+
+    private final AnimationBlend blend = new AnimationBlend();
 
     //? if >=26.1 {
 	/*public GemRenderItemRenderer(ItemAppearance appearance) {
@@ -280,7 +283,8 @@ public class GemRenderItemRenderer extends BlockEntityWithoutLevelRenderer {
      * should: a slot it keeps.
      */
     public boolean animates(ItemStack stack, ItemDisplayContext context) {
-        return appearance.clip(stack, context) != null;
+        return appearance.clip(stack, context) != null
+                || appearance.blend(stack, context, Vanilla.partialTick(), blend.clear()) && blend.moves();
     }
 
     private void draw(ItemStack stack, ItemDisplayContext context, PoseStack pose, int light,
@@ -309,11 +313,17 @@ public class GemRenderItemRenderer extends BlockEntityWithoutLevelRenderer {
 
             appearance.transform(stack, context, pose);
 
-            DirectRenderer.submit(model, appearance.clip(stack, context),
-                    appearance.seconds(stack, context, partialTick), pose.last()
-                            .pose(),
-                    light, overlay, appearance.tint(stack, context), passFor(context),
-                    appearance.variant(stack, context));
+            if (appearance.blend(stack, context, partialTick, blend.clear())) {
+                DirectRenderer.submit(model, blend, pose.last()
+                                .pose(), light, overlay, appearance.tint(stack, context), passFor(context),
+                        appearance.variant(stack, context));
+            } else {
+                DirectRenderer.submit(model, appearance.clip(stack, context),
+                        appearance.seconds(stack, context, partialTick), pose.last()
+                                .pose(),
+                        light, overlay, appearance.tint(stack, context), passFor(context),
+                        appearance.variant(stack, context));
+            }
         } finally {
             pose.popPose();
         }

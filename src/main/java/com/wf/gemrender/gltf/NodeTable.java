@@ -42,6 +42,8 @@ public final class NodeTable {
 
     private final Map<String, Integer> nameSlots;
 
+    private final int[] weightSlots;
+
     private NodeTable(int nodeCount, float[] restState, Matrix4f[] fixedLocal, int[] parents, int[] order,
                       int[] weightBase, int[] weightCount, Map<NodeModel, Integer> slots, String[] names) {
         this.nodeCount = nodeCount;
@@ -61,6 +63,13 @@ public final class NodeTable {
             }
         }
         this.nameSlots = Map.copyOf(byName);
+
+        this.weightSlots = new int[restState.length - nodeCount * TRS_STRIDE];
+        for (int slot = 0; slot < nodeCount; slot++) {
+            for (int k = 0; k < weightCount[slot]; k++) {
+                weightSlots[weightBase[slot] - nodeCount * TRS_STRIDE + k] = slot;
+            }
+        }
     }
 
     public static NodeTable of(List<NodeModel> nodes) {
@@ -353,13 +362,8 @@ public final class NodeTable {
         if (offset < nodeCount * TRS_STRIDE) {
             return offset / TRS_STRIDE;
         }
-        for (int slot = 0; slot < nodeCount; slot++) {
-            if (weightCount[slot] > 0 && offset >= weightBase[slot]
-                    && offset < weightBase[slot] + weightCount[slot]) {
-                return slot;
-            }
-        }
-        return -1;
+        int weight = offset - nodeCount * TRS_STRIDE;
+        return weight < weightSlots.length ? weightSlots[weight] : -1;
     }
 
     public int weightBase(int slot) {

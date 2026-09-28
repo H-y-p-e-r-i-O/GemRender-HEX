@@ -15,16 +15,16 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *
  * <p>Built around the fact that a thousand particles from one explosion sweep the same few hundred blocks.
  * Each segment is walked block by block rather than handed to {@code BlockGetter.clip}, and what each block
- * turned out to be is remembered — so the second particle through a patch of ground pays an array index
+ * turned out to be is remembered, so the second particle through a patch of ground pays an array index
  * where the first paid a chunk lookup and a shape build. That is the whole reason a burst this size fits in
  * a frame; see {@code docs/INTEGRATION.md}, "What it costs".
  *
- * <p>A full cube — almost everything a particle ever lands on — is answered from the walk itself, with the
+ * <p>A full cube (almost everything a particle ever lands on) is answered from the walk itself, with the
  * face it entered through. Only a partial shape (a slab, a fence, a stair) falls back to clipping the real
  * {@link VoxelShape}, which is exact and rare.
  *
  * <p>It is the block collision shapes that are consulted, not the visual ones, so a particle settles on the
- * surface a player would stand on. Fluids are ignored — a particle that stops at the surface of water reads
+ * surface a player would stand on. Fluids are ignored: a particle that stops at the surface of water reads
  * as a bug, and one that sinks reads as water.
  *
  * <p>Short-lived by design: the cache is a snapshot of a world that can be mined. Hold one for a burst, not
@@ -65,7 +65,7 @@ public final class LevelContactProbe implements ParticleCollision.Probe {
      * The face of a block, in {@link ParticleCollision}'s encoding.
      *
      * <p>Spelled out rather than taken from {@code Direction.ordinal()} so that the two orderings are free to
-     * disagree — one of them is vanilla's and can move underneath this.
+     * disagree: one of them is vanilla's and can move underneath this.
      */
     public static int encode(Direction direction) {
         switch (direction) {

@@ -1,5 +1,7 @@
 package com.wf.gemrender.gltf;
 
+import com.wf.gemrender.gltf.blend.AnimationBlend;
+import com.wf.gemrender.gltf.blend.BlendEvaluator;
 import com.wf.gemrender.gltf.morph.GltfMorphLayout;
 import org.joml.Matrix4f;
 
@@ -48,6 +50,14 @@ public final class GltfPose {
         compose(layout, palette, morphs, morphOut, scratch, state);
     }
 
+    public static void evaluate(GltfPaletteLayout layout, AnimationBlend blend, Matrix4f[] palette,
+                                GltfMorphLayout morphs, float[] morphOut, Scratch scratch) {
+        NodeTable table = layout.nodeTable();
+        float[] state = scratch.state(table);
+        BlendEvaluator.evaluate(table, blend, state, scratch.blend);
+        compose(layout, palette, morphs, morphOut, scratch, state);
+    }
+
     public static void evaluate(GltfPaletteLayout layout, float[] state, Matrix4f[] palette,
                                 GltfMorphLayout morphs, float[] morphOut, Scratch scratch) {
         compose(layout, palette, morphs, morphOut, scratch, state);
@@ -91,6 +101,7 @@ public final class GltfPose {
 
     public static final class Scratch {
         private final Matrix4f local = new Matrix4f();
+        private final BlendEvaluator.Scratch blend = new BlendEvaluator.Scratch();
 
         private float[] state = new float[0];
         private Matrix4f[] palette = new Matrix4f[0];

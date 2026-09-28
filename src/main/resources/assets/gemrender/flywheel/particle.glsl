@@ -1,6 +1,6 @@
 uniform samplerBuffer _gemrender_particles;
 
-const int GEMRENDER_STYLE_FLOATS = 20;
+const int GEMRENDER_STYLE_FLOATS = 24;
 const int GEMRENDER_MAX_STYLES = 256;
 const int GEMRENDER_PARTICLE_FLOATS = 16;
 const int GEMRENDER_STYLE_TEXELS = GEMRENDER_STYLE_FLOATS / 4;
@@ -16,12 +16,14 @@ struct GemRenderParticle {
     float sizeScale;
     float spinPhase;
     float tintScale;
-// Where this particle's flight runs into the world, worked out on the CPU at spawn -- see
+// Where this particle's flight runs into the world, worked out on the CPU at spawn; see
 // ParticleCollision. contactAge is GemRender's NEVER (1e30) for a particle that hits nothing, which is
 // what lets the arithmetic below be unconditional rather than branchy.
     float contactAge;
     float contactNormal;
     float restAge;
+// 0 = none: style tint + style light. Else 1 + (rgb565 << 8 | block << 4 | sky); see ParticleLook.
+    float look;
 };
 
 struct GemRenderStyle {
@@ -40,6 +42,8 @@ struct GemRenderStyle {
     float fadeIn;
     float restitution;
     float friction;
+    float fadeOut;
+    float streak;
 };
 
 GemRenderParticle gemrender_particle(uint slot) {
@@ -62,6 +66,7 @@ GemRenderParticle gemrender_particle(uint slot) {
     p.contactAge = d.x;
     p.contactNormal = d.y;
     p.restAge = d.z;
+    p.look = d.w;
     return p;
 }
 
@@ -73,6 +78,7 @@ GemRenderStyle gemrender_style(float index) {
     vec4 c = texelFetch(_gemrender_particles, base + 2);
     vec4 d = texelFetch(_gemrender_particles, base + 3);
     vec4 e = texelFetch(_gemrender_particles, base + 4);
+    vec4 f = texelFetch(_gemrender_particles, base + 5);
 
     GemRenderStyle s;
     s.drag = a.x;
@@ -90,6 +96,8 @@ GemRenderStyle gemrender_style(float index) {
     s.fadeIn = d.w;
     s.restitution = e.x;
     s.friction = e.y;
+    s.fadeOut = e.w;
+    s.streak = f.x;
     // e.z is the style's ContactResponse, which only the CPU reads: what it decides is already baked into
     // the two ages and the life the particle carries.
     return s;
@@ -138,7 +146,7 @@ vec3 _gemrender_normal(float encoded) {
 }
 
 // The velocity coming out of a surface: what went into it returns scaled by restitution, what ran along it
-// keeps friction. A velocity already leaving is only slowed -- flipping it would drive the particle back
+// keeps friction. A velocity already leaving is only slowed: flipping it would drive the particle back
 // into the block it just left.
 vec3 _gemrender_reflect(vec3 velocity, float encoded, in GemRenderStyle s) {
     vec3 n = _gemrender_normal(encoded);
@@ -170,6 +178,11 @@ vec3 gemrender_particleVelocity(in GemRenderParticle p, in GemRenderStyle s, flo
     return _gemrender_flightVel(_gemrender_reflect(v, p.contactNormal, s), s, settled);
 }
 
+// Zero once settled (age >= restAge); gemrender_particleVelocity keeps the landing vector for attitude.
+vec3 gemrender_particleMotion(in GemRenderParticle p, in GemRenderStyle s, float age) {
+    return age >= p.restAge ? vec3(0.0) : gemrender_particleVelocity(p, s, age);
+}
+
 vec3 gemrender_particlePosition(in GemRenderParticle p, in GemRenderStyle s, float age) {
     float flight = min(age, p.contactAge);
     vec3 at = _gemrender_flightPos(p.spawnPos, p.spawnVelocity, s, flight);
@@ -190,11 +203,116 @@ float gemrender_particleSize(in GemRenderParticle p, in GemRenderStyle s, float 
     return p.sizeScale * (s.size0 + s.sizeRate * unitAge);
 }
 
+bool gemrender_particleHasLook(in GemRenderParticle p) {
+    return p.look > 0.5;
+}
+
+int _gemrender_look(in GemRenderParticle p) {
+    return int(p.look + 0.5) - 1;
+}
+
+vec3 gemrender_particleLookColor(in GemRenderParticle p) {
+    if (!gemrender_particleHasLook(p)) {
+        return vec3(1.0);
+    }
+    int v = _gemrender_look(p);
+    return vec3(float((v >> 19) & 31) / 31.0, float((v >> 13) & 63) / 63.0, float((v >> 8) & 31) / 31.0);
+}
+
+vec2 gemrender_particleLight(in GemRenderParticle p, in GemRenderStyle s) {
+    if (!gemrender_particleHasLook(p)) {
+        return s.light;
+    }
+    int v = _gemrender_look(p);
+    return vec2(float((v >> 4) & 15), float(v & 15)) / 16.0;
+}
+
+// 0 until fadeOut, then 0 -> 1 by the end of life. fadeOut == 0: the whole life.
+float gemrender_particleFade(in GemRenderStyle s, float unitAge) {
+    return clamp((unitAge - s.fadeOut) / max(1.0 - s.fadeOut, 1e-6), 0.0, 1.0);
+}
+
 vec4 gemrender_particleColor(in GemRenderParticle p, in GemRenderStyle s, float unitAge) {
     float cool = s.coolFloor
     + (1.0 - s.coolFloor) * (1.0 - min(unitAge / max(s.coolSpan, 1e-6), 1.0));
-    float alpha = s.alphaScale * pow(1.0 - unitAge, s.alphaFalloff);
+    float alpha = s.alphaScale * pow(1.0 - gemrender_particleFade(s, unitAge), s.alphaFalloff);
     float ramp = s.fadeIn > 1e-4 ? min(unitAge / s.fadeIn, 1.0) : 1.0;
 
-    return vec4(clamp(s.tint * cool * p.tintScale, 0.0, 1.0), clamp(alpha * ramp, 0.0, 1.0));
+    return vec4(clamp(s.tint * gemrender_particleLookColor(p) * cool * p.tintScale, 0.0, 1.0),
+                clamp(alpha * ramp, 0.0, 1.0));
+}
+
+// Right-handed (t, b, n), t x b = n; rolled about n.
+mat3 gemrender_planeBasis(vec3 n, float roll) {
+    vec3 reference = abs(n.y) > 0.999 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 t = normalize(cross(reference, n));
+    vec3 b = cross(n, t);
+    float c = cos(roll);
+    float si = sin(roll);
+    return mat3(t * c + b * si, b * c - t * si, n);
+}
+
+// DECAL: spawnVelocity carries the surface normal; the particle never moves.
+vec3 gemrender_decalNormal(in GemRenderParticle p) {
+    float len = length(p.spawnVelocity);
+    return len > 1e-6 ? p.spawnVelocity / len : vec3(0.0, 1.0, 0.0);
+}
+
+const float GEMRENDER_DECAL_LIFT = 1.0 / 512.0;
+
+vec3 gemrender_decalCorner(in GemRenderParticle p, vec2 corner, float size) {
+    mat3 basis = gemrender_planeBasis(gemrender_decalNormal(p), p.spinPhase);
+    return p.spawnPos + basis * vec3(corner * size, GEMRENDER_DECAL_LIFT);
+}
+
+// STREAK: y along motion, head at the particle (corner.y = 0.5), tail streak * |v| behind; x across, facing eye.
+// Feed gemrender_particleMotion: settled => width x width dot.
+vec3 gemrender_streakCorner(vec3 center, vec3 velocity, vec3 eye, vec3 fallbackRight, vec2 corner, float width,
+                            float streak) {
+    float speed = length(velocity);
+    vec3 dir = speed > 1e-6 ? velocity / speed : vec3(0.0, 1.0, 0.0);
+    float len = max(streak * speed, width);
+    vec3 across = cross(dir, eye - center);
+    float acrossLen = length(across);
+    vec3 side = acrossLen > 1e-6 ? across / acrossLen : fallbackRight;
+    return center + side * (corner.x * width) + dir * ((corner.y - 0.5) * len);
+}
+
+float gemrender_streakLength(vec3 velocity, float width, float streak) {
+    return max(streak * length(velocity), width);
+}
+
+// BODY: tumbles about a horizontal axis (yawed by spinPhase) at spinRate; comes to rest lying down (+Y
+// horizontal) and eases into that attitude over the rebound leg.
+const float GEMRENDER_PI = 3.14159265;
+
+float _gemrender_bodyAngle(in GemRenderParticle p, in GemRenderStyle s, float age) {
+    float free = 2.0 * p.spinPhase + s.spinRate * min(age, p.restAge);
+    if (age <= p.contactAge) {
+        return free;
+    }
+    float rest = GEMRENDER_PI * (floor((2.0 * p.spinPhase + s.spinRate * p.restAge) / GEMRENDER_PI) + 0.5);
+    float span = p.restAge - p.contactAge;
+    float w = span > 1e-6 ? clamp((age - p.contactAge) / span, 0.0, 1.0) : 1.0;
+    return mix(free, rest, w * w);
+}
+
+mat3 gemrender_bodyBasis(in GemRenderParticle p, in GemRenderStyle s, float age) {
+    vec2 ground = p.spawnVelocity.xz;
+    float groundLen = length(ground);
+    vec2 heading = groundLen > 1e-6 ? ground / groundLen : vec2(0.0, 1.0);
+    float cy = cos(p.spinPhase);
+    float sy = sin(p.spinPhase);
+    vec3 forward = vec3(heading.x * cy - heading.y * sy, 0.0, heading.x * sy + heading.y * cy);
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 axis = cross(up, forward);
+
+    float angle = _gemrender_bodyAngle(p, s, age);
+    vec3 y = up * cos(angle) + forward * sin(angle);
+    return mat3(axis, y, cross(axis, y));
+}
+
+// BODY shrinks through the fade window instead of blending: its meshes are usually opaque.
+float gemrender_bodyScale(in GemRenderStyle s, float unitAge) {
+    return 1.0 - gemrender_particleFade(s, unitAge);
 }

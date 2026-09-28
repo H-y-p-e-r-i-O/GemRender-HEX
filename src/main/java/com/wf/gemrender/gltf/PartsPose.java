@@ -1,6 +1,8 @@
 package com.wf.gemrender.gltf;
 
 import com.wf.gemrender.gltf.GemRenderPartsModel.Part;
+import com.wf.gemrender.gltf.blend.AnimationBlend;
+import com.wf.gemrender.gltf.blend.BlendEvaluator;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 
@@ -64,6 +66,18 @@ public final class PartsPose {
         compose(model, out, only, scratch, state);
     }
 
+    /**
+     * A blended pose. {@code only}: as above, union over every layer's clip.
+     */
+    public static void evaluate(GemRenderPartsModel model, AnimationBlend blend, Matrix4f[] out,
+                                boolean @Nullable [] only, Scratch scratch) {
+        NodeTable table = model.layout()
+                .nodeTable();
+        float[] state = scratch.state(table);
+        BlendEvaluator.evaluate(table, blend, state, scratch.blend);
+        compose(model, out, only, scratch, state);
+    }
+
     private static void compose(GemRenderPartsModel model, Matrix4f[] out, boolean @Nullable [] only,
                                 Scratch scratch, float[] state) {
         NodeTable table = model.layout()
@@ -95,6 +109,7 @@ public final class PartsPose {
      */
     public static final class Scratch {
         private final Matrix4f local = new Matrix4f();
+        private final BlendEvaluator.Scratch blend = new BlendEvaluator.Scratch();
         private float[] state = new float[0];
 
         private float[] state(NodeTable table) {

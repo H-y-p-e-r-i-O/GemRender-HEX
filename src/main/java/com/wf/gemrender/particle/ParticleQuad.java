@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * wants. {@link #ofUv} spans a rectangle of one instead, which is what a particle drawn from an <em>atlas</em>
  * wants: a block chip samples the terrain sheet, and the sprite it samples is a fixed window into it that is
  * known when the model is built rather than per-particle. Baking it into the mesh keeps the particle layout
- * untouched — UVs are not per-particle data and should not be paying for a slot in it.
+ * untouched: UVs are not per-particle data and should not be paying for a slot in it.
  */
 public final class ParticleQuad implements QuadMesh {
     public static final ParticleQuad INSTANCE = new ParticleQuad(0.0f, 0.0f, 1.0f, 1.0f);
@@ -41,7 +41,7 @@ public final class ParticleQuad implements QuadMesh {
     /**
      * The same quad mapped onto a window of an atlas.
      *
-     * @param u0 left, {@code v0} top, {@code u1} right, {@code v1} bottom — the four numbers a
+     * @param u0 left, {@code v0} top, {@code u1} right, {@code v1} bottom: the four numbers a
      *           {@code TextureAtlasSprite} reports
      */
     public static ParticleQuad ofUv(float u0, float v0, float u1, float v1) {

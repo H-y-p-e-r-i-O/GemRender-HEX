@@ -28,5 +28,5 @@ void flw_instanceVertex(in FlwInstance i) {
     flw_vertexNormal = basis * flw_vertexNormal;
     flw_vertexColor = gemrender_particleColor(p, s, unitAge);
     flw_vertexOverlay = ivec2(0, 10);
-    flw_vertexLight = s.light;
+    flw_vertexLight = gemrender_particleLight(p, s);
 }

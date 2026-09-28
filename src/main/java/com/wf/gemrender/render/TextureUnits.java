@@ -19,6 +19,8 @@ public final class TextureUnits {
 
     public static final int VOLUME_FIELD = Integer.getInteger("gemrender.volumefieldunit", 18);
 
+    public static final int PAINT = Integer.getInteger("gemrender.paintunit", 19);
+
     private TextureUnits() {
     }
 

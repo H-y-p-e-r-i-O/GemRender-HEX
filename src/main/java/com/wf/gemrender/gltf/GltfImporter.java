@@ -92,6 +92,8 @@ public final class GltfImporter {
 
         Map<GltfMaterial, List<MeshGeometry>> byMaterial = new LinkedHashMap<>();
         int maxInfluences = 0;
+        java.util.Set<ResourceLocation> masks = new java.util.LinkedHashSet<>();
+        boolean allPbr = true;
 
         for (Primitive primitive : primitives) {
             boolean atlased = atlas != null && atlas.contains(primitive.maps());
@@ -116,13 +118,20 @@ public final class GltfImporter {
                     key -> ModelTextures.materialTexture(key, ownedTextures));
 
             boolean banded = atlased && atlas.bands() > 1;
+            if (atlased && primitive.maps()
+                    .paint() != null) {
+                masks.add(primitive.maps()
+                        .paint());
+            }
             if (primitive.material()
                     .pbr() && !banded) {
                 GemRender.LOGGER.warn("{} wants PBR maps but its sheet has no bands; drawing base colour only",
                         primitive.texture());
             }
-            byMaterial.computeIfAbsent(primitive.material()
-                            .onTexture(texture, banded), key -> new ArrayList<>())
+            GltfMaterial material = primitive.material()
+                    .onTexture(texture, banded);
+            allPbr &= material.pbr();
+            byMaterial.computeIfAbsent(material, key -> new ArrayList<>())
                     .add(geometry);
         }
 
@@ -177,7 +186,10 @@ public final class GltfImporter {
         GemRenderGltfModel converted = new GemRenderGltfModel(new SimpleModel(meshes), layout, bounds.build(),
                 morphLayout, animations, atlas == null ? null : atlas.texture(), ownedTextures,
                 atlas == null ? java.util.List.of(com.wf.gemrender.texture.VariantUv.NONE)
-                        : atlas.variants());
+                        : atlas.variants(), masks.isEmpty() || !allPbr ? -1 : paintReference(masks));
+        if (!masks.isEmpty() && !allPbr) {
+            GemRender.LOGGER.warn("{} has a paint mask but a mesh outside the banded sheet; not paintable", source);
+        }
 
         GemRender.LOGGER.info(
                 "Loaded glTF {}: {} palette slots ({} nodes + {} skinned joints in {} skins), "
@@ -221,6 +233,37 @@ public final class GltfImporter {
         return converted;
     }
 
+    private static int paintReference(java.util.Set<ResourceLocation> masks) {
+        double r = 0.0;
+        double g = 0.0;
+        double b = 0.0;
+        double weight = 0.0;
+        for (ResourceLocation mask : masks) {
+            com.mojang.blaze3d.platform.NativeImage image = ModelTextures.read(mask);
+            if (image == null) {
+                continue;
+            }
+            try {
+                for (int y = 0; y < image.getHeight(); y++) {
+                    for (int x = 0; x < image.getWidth(); x++) {
+                        int pixel = com.wf.gemrender.texture.Pixels.get(image, x, y);
+                        double coverage = (pixel >>> 24) / 255.0;
+                        r += coverage * (pixel & 0xFF);
+                        g += coverage * (pixel >> 8 & 0xFF);
+                        b += coverage * (pixel >> 16 & 0xFF);
+                        weight += coverage;
+                    }
+                }
+            } finally {
+                image.close();
+            }
+        }
+        if (weight == 0.0) {
+            return -1;
+        }
+        return (int) Math.round(r / weight) << 16 | (int) Math.round(g / weight) << 8 | (int) Math.round(b / weight);
+    }
+
     private static float[] morphExtent(MorphTargets targets, int vertexCount) {
         if (targets == null) {
             return null;
@@ -252,7 +295,16 @@ public final class GltfImporter {
                 flywheel.w(), flywheel.x(), flywheel.y(), flywheel.z()));
     }
 
+    /** Node-name prefixes of consumer-side data (hit volumes, attach markers): never drawn, subtree included. */
+    public static final List<String> HIDDEN_PREFIXES = List.of("hit_", "socket_");
+
     private static void collectPrimitives(NodeModel node, GltfPaletteLayout layout, List<Primitive> out) {
+        if (node.getName() != null) {
+            String name = node.getName().toLowerCase(java.util.Locale.ROOT);
+            if (HIDDEN_PREFIXES.stream().anyMatch(name::startsWith)) {
+                return;
+            }
+        }
         for (MeshModel mesh : node.getMeshModels()) {
             for (MeshPrimitiveModel primitive : mesh.getMeshPrimitiveModels()) {
                 if (primitive.getMode() != 4) {
@@ -382,8 +434,9 @@ public final class GltfImporter {
 
         float[] base = v2.getBaseColorFactor();
         float[] emissive = v2.getEmissiveFactor();
+        ResourceLocation baseColor = texture(v2.getBaseColorTexture(), true);
 
-        return new MaterialMaps(texture(v2.getBaseColorTexture(), true),
+        return new MaterialMaps(baseColor,
                 secondaryUv(v2) ? null : texture(v2.getNormalTexture(), false),
                 secondaryUv(v2) ? null : texture(v2.getMetallicRoughnessTexture(), false),
                 secondaryUv(v2) ? null : texture(v2.getOcclusionTexture(), false),
@@ -391,7 +444,8 @@ public final class GltfImporter {
                 factor(base, 0), factor(base, 1), factor(base, 2), factor(base, 3),
                 v2.getMetallicFactor(), v2.getRoughnessFactor(), v2.getNormalScale(),
                 v2.getOcclusionStrength(), factor(emissive, 0, 0.0f), factor(emissive, 1, 0.0f),
-                factor(emissive, 2, 0.0f));
+                factor(emissive, 2, 0.0f),
+                ModelTextures.sibling(baseColor, MaterialMaps.PAINT_SUFFIX));
     }
 
     private static boolean secondaryUv(MaterialModelV2 v2) {

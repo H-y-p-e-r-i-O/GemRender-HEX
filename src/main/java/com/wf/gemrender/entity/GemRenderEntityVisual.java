@@ -3,6 +3,7 @@ package com.wf.gemrender.entity;
 import com.wf.gemrender.asset.ModelCache;
 import com.wf.gemrender.gltf.GemRenderGltfModel;
 import com.wf.gemrender.gltf.GltfAnimation;
+import com.wf.gemrender.gltf.blend.AnimationBlend;
 import com.wf.gemrender.render.*;
 import dev.engine_room.flywheel.api.visual.DynamicVisual;
 import dev.engine_room.flywheel.api.visualization.VisualizationContext;
@@ -53,6 +54,7 @@ public abstract class GemRenderEntityVisual<T extends Entity> extends ComponentE
     private GemRenderInstance instance;
     private GltfAnimation[] clips = new GltfAnimation[0];
     private float[] times = new float[0];
+    private final AnimationBlend blend = new AnimationBlend();
     @Nullable
     private PoseCache.Pose posed;
 
@@ -76,6 +78,15 @@ public abstract class GemRenderEntityVisual<T extends Entity> extends ComponentE
      * from the world clock, or from a value drawn from a small fixed set, lets a crowd share.
      */
     protected abstract void animate(float partialTick, GltfAnimation[] clips, float[] times);
+
+    /**
+     * This frame's blended animation, taking precedence over {@link #animate} (still required: the pose
+     * whenever this returns false): fill {@code blend} (already cleared) and return true. Same cost rule:
+     * quantized per layer, so a crowd sharing clip, instant and weight shares a pose.
+     */
+    protected boolean blend(float partialTick, AnimationBlend blend) {
+        return false;
+    }
 
     /**
      * How many clips {@link #animate} is given. One unless the entity's parts answer to different things.
@@ -186,16 +197,21 @@ public abstract class GemRenderEntityVisual<T extends Entity> extends ComponentE
         transform(transform, partialTick);
         target.pose.set(transform);
 
-        for (int layer = 0; layer < clips.length; layer++) {
-            clips[layer] = null;
-            times[layer] = 0.0f;
+        int lod = PoseLod.getInstance()
+                .levelAt(distanceSquared);
+        PoseCache.Pose pose;
+        if (blend(partialTick, blend.clear())) {
+            pose = PoseCache.getInstance()
+                    .pose(model.layout(), model.bounds(), model.morphs(), blend, lod);
+        } else {
+            for (int layer = 0; layer < clips.length; layer++) {
+                clips[layer] = null;
+                times[layer] = 0.0f;
+            }
+            animate(partialTick, clips, times);
+            pose = PoseCache.getInstance()
+                    .pose(model.layout(), model.bounds(), model.morphs(), clips, times, lod);
         }
-        animate(partialTick, clips, times);
-
-        PoseCache.Pose pose = PoseCache.getInstance()
-                .pose(model.layout(), model.bounds(), model.morphs(), clips, times,
-                        PoseLod.getInstance()
-                                .levelAt(distanceSquared));
         posed = pose;
 
         target.boneBase = pose.boneBase();

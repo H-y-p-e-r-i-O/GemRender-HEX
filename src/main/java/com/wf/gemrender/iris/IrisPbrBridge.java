@@ -16,6 +16,7 @@ public final class IrisPbrBridge {
             return;
         }
         installed = true;
+        ShaderPacks.irisLoaded(irisLoaded);
 
         if (!ENABLED || !irisLoaded) {
             return;

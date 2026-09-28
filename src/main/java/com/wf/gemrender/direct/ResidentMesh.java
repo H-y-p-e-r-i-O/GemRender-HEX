@@ -20,7 +20,7 @@ import static org.lwjgl.opengl.GL33C.GL_UNSIGNED_INT;
 
 final class ResidentMesh {
 
-    static final int INSTANCE_STRIDE = 100;
+    static final int INSTANCE_STRIDE = 116;
     private static final int VERTEX_STRIDE = 48;
     private final int vao;
     private final int vertexBuffer;
@@ -109,9 +109,10 @@ final class ResidentMesh {
             glVertexAttribDivisor(12, 1);
             attribute(13, 4, GL_UNSIGNED_BYTE, true, INSTANCE_STRIDE, 80);
             glVertexAttribDivisor(13, 1);
-            attribute(14, 2, GL_FLOAT, false, INSTANCE_STRIDE, 84);
+            // 14 = (overlay, uvOffset), 15 = paint: 16 attributes is the GL minimum.
+            attribute(14, 4, GL_FLOAT, false, INSTANCE_STRIDE, 84);
             glVertexAttribDivisor(14, 1);
-            attribute(15, 2, GL_FLOAT, false, INSTANCE_STRIDE, 92);
+            attribute(15, 4, GL_FLOAT, false, INSTANCE_STRIDE, 100);
             glVertexAttribDivisor(15, 1);
 
             glBindVertexArray(0);

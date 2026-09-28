@@ -25,6 +25,11 @@ public final class GemRenderInstanceTypes {
                     .vector("boneSphere", FloatRepr.FLOAT, 4)
                     .matrix("pose", FloatRepr.FLOAT, 4)
                     .vector("uvOffset", FloatRepr.FLOAT, 2)
+                    .scalar("jointUvBase", UnsignedIntegerRepr.UNSIGNED_INT)
+                    .scalar("paint", UnsignedIntegerRepr.UNSIGNED_INT)
+                    .scalar("paintScale", FloatRepr.FLOAT)
+                    .scalar("paintReference", UnsignedIntegerRepr.UNSIGNED_INT)
+                    .scalar("paintRestBase", UnsignedIntegerRepr.UNSIGNED_INT)
                     .build())
             .writer((ptr, instance) -> {
                 MemoryUtil.memPutByte(ptr, instance.red);
@@ -41,6 +46,11 @@ public final class GemRenderInstanceTypes {
                 ExtraMemoryOps.putMatrix4f(ptr + 32, instance.pose);
                 MemoryUtil.memPutFloat(ptr + 96, instance.uvOffset.x);
                 MemoryUtil.memPutFloat(ptr + 100, instance.uvOffset.y);
+                MemoryUtil.memPutInt(ptr + 104, instance.jointUvBase);
+                MemoryUtil.memPutInt(ptr + 108, instance.paint);
+                MemoryUtil.memPutFloat(ptr + 112, instance.paintScale);
+                MemoryUtil.memPutInt(ptr + 116, instance.paintReference);
+                MemoryUtil.memPutInt(ptr + 120, instance.paintRestBase);
             })
 
             .vertexShader(shader("instance/skinned.vert"))

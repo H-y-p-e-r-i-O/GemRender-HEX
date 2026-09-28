@@ -3,6 +3,7 @@ package com.wf.gemrender.direct;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.wf.gemrender.gltf.GemRenderGltfModel;
 import com.wf.gemrender.gltf.GltfAnimation;
+import com.wf.gemrender.gltf.blend.AnimationBlend;
 import com.wf.gemrender.texture.VariantUv;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
@@ -44,6 +45,16 @@ public interface ItemAppearance {
      */
     default float seconds(ItemStack stack, ItemDisplayContext context, float partialTick) {
         return 0.0f;
+    }
+
+    /**
+     * A blended pose instead of {@link #clip}/{@link #seconds}: fill {@code out} (already cleared) and
+     * return true. Layer times are clip-local and not wrapped. Same purity rule as {@link #seconds}:
+     * 26.1 also calls it to decide atlas redraw, so up to twice per frame; no {@code Crossfade.play} here.
+     * {@code out} is the renderer's, reused every call.
+     */
+    default boolean blend(ItemStack stack, ItemDisplayContext context, float partialTick, AnimationBlend out) {
+        return false;
     }
 
     /**

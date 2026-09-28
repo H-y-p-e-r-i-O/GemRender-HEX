@@ -28,7 +28,7 @@ public enum ContactResponse {
      * Vanish on contact. Spray and sparks that should not survive the wall they hit.
      *
      * <p>Implemented by shortening the particle's life at spawn rather than by anything the shader does, so
-     * it is free — a particle that dies at the wall is just a particle with a shorter life.
+     * it is free: a particle that dies at the wall is just a particle with a shorter life.
      */
     DIE
 }

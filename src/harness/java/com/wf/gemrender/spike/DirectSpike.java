@@ -94,6 +94,30 @@ public final class DirectSpike {
 
 	private static int copy;
 
+	private static final boolean DIRECT_BLEND = Boolean.getBoolean("gemrender.directblend");
+
+	private record BlendAssets(GemRenderGltfModel model, GltfAnimation clip, float timeB, GltfAnimation swing,
+			com.wf.gemrender.gltf.blend.AdditiveReference rest, org.joml.Vector4f sphere) {
+	}
+
+	@Nullable
+	private static BlendAssets blendAssets;
+
+	private static BlendAssets blendAssets(GemRenderGltfModel model) {
+		if (blendAssets == null || blendAssets.model() != model) {
+			com.wf.gemrender.gltf.NodeTable table = model.layout()
+					.nodeTable();
+			GltfAnimation clip = model.animationOrAny("");
+			blendAssets = new BlendAssets(model, clip, BlendVisual.farthestFrom(table, clip, 0.0f),
+					GltfAnimation.procedural("swing", com.wf.gemrender.gltf.NodeSwing.open(table,
+							BlendVisual.defaultNode(table), 0.0f, 0.0f, 1.0f, (float) Math.toRadians(35.0))),
+					com.wf.gemrender.gltf.blend.AdditiveReference.rest(table), new org.joml.Vector4f());
+			model.bounds()
+					.evaluate(model.restPalette(), blendAssets.sphere());
+		}
+		return blendAssets;
+	}
+
 	private static GemRenderItemRenderer renderer;
 
 	private static GemRenderArmorModel armor;
@@ -119,7 +143,7 @@ public final class DirectSpike {
 			case "morph" -> SpikeAssets.MORPH;
 			case "glass" -> SpikeAssets.GLASS;
 			case "pbr" -> SpikeAssets.PBR;
-			default -> SpikeAssets.RADAR;
+			default -> ASSET.indexOf(':') > 0 ? com.wf.gemrender.Ids.parse(ASSET) : SpikeAssets.RADAR;
 		};
 	}
 
@@ -158,6 +182,21 @@ public final class DirectSpike {
 				}
 
 				@Override
+				public boolean blend(ItemStack stack, ItemDisplayContext context, float partialTick,
+						com.wf.gemrender.gltf.blend.AnimationBlend out) {
+					GemRenderGltfModel model = DirectSpike.model();
+					if (!DIRECT_BLEND || model == null) {
+						return false;
+					}
+					BlendAssets assets = blendAssets(model);
+					float w = COUNT <= 1 ? 0.5f : copy / (float) (COUNT - 1);
+					out.override(assets.clip(), 0.0f, 1.0f - w);
+					out.override(assets.clip(), assets.timeB(), w);
+					out.additive(assets.swing(), 1.0f, w, com.wf.gemrender.gltf.blend.BlendMask.ALL, assets.rest());
+					return true;
+				}
+
+				@Override
 				public float seconds(ItemStack stack, ItemDisplayContext context, float partialTick) {
 					Minecraft minecraft = Minecraft.getInstance();
 					if (minecraft.level == null) {
@@ -175,7 +214,7 @@ public final class DirectSpike {
 					if (model == null) {
 						return;
 					}
-					org.joml.Vector4fc sphere = model.model()
+					org.joml.Vector4fc sphere = DIRECT_BLEND ? blendAssets(model).sphere() : model.model()
 							.boundingSphere();
 					float radius = Math.max(0.001f, sphere.w());
 					float scale = 0.5f / radius;
@@ -513,6 +552,7 @@ public final class DirectSpike {
 				+ (TOTEM ? " directTotem=1" : "")
 				+ (INTERLEAVE ? " directInterleave=1" : "")
 				+ (ITEM_GRID ? " guiItemGrid=1" : "")
+				+ (DIRECT_BLEND ? " directBlend=1" : "")
 				+ " guiDraws=" + guiDraws + " guiPalettes=" + guiPalettes
 				+ " guiInstances=" + guiInstances
 				+ " levelDraws=" + levelDraws + " directStats=[" + DirectStats.report() + "]";

@@ -57,8 +57,12 @@ public final class ParticleMotion {
         return sizeScale * (style.sizeAtBirth + style.sizeGrowth * unitAge);
     }
 
+    public static float fade(ParticleStyle style, float unitAge) {
+        return Math.max(0.0f, Math.min(1.0f, (unitAge - style.fadeOut) / Math.max(1.0f - style.fadeOut, 1e-6f)));
+    }
+
     public static float alpha(ParticleStyle style, float unitAge) {
-        float alpha = style.alphaScale * (float) Math.pow(1.0f - unitAge, style.alphaFalloff);
+        float alpha = style.alphaScale * (float) Math.pow(1.0f - fade(style, unitAge), style.alphaFalloff);
         float ramp = style.fadeIn > DRAG_EPSILON ? Math.min(unitAge / style.fadeIn, 1.0f) : 1.0f;
         return Math.max(0.0f, Math.min(1.0f, alpha * ramp));
     }

@@ -113,6 +113,10 @@ rather than starting another, and a failure is remembered so a broken file is no
 frame. `handle.isLoading()` distinguishes "still importing" from "broken" if you want to say so in a
 tooltip; `handle.getBlocking()` waits, and is for a command or a test, never for a frame.
 
+### Hidden nodes
+
+glTF node named `hit_*` or `socket_*` (case-insensitive): subtree never drawn; still in the node table. For consumer-side data (hit volumes, attach markers) shipped inside the model.
+
 ### Bedrock geometry and its texture
 
 A `.geo.json` names no texture — the format has none — so the importer looks for a `.png` beside it,
@@ -181,6 +185,47 @@ PBR sheet is three times as tall before any of this, so variants tile across it 
 layout. A skin of another size throws at import with both sizes named. That is deliberate: dropping it
 quietly would ship a model wearing the wrong skin, and that is a content bug which never announces
 itself.
+
+### Per-joint variants
+
+One skin per bone instead of per copy (damage, per-part paint), still one draw:
+
+```java
+float[] uv = new float[gltf.jointCount() * 2];           // (u, v) per joint = gltf.variant(k) of choice
+instance.jointVariants(BoneBuffer.getInstance().addFloatBlock(uv, uv.length)); // every frame, like the palette
+instance.jointVariants(GemRenderInstance.NO_JOINT_VARIANTS);                    // back to uvOffset
+```
+
+- A vertex takes its **dominant** joint's offset (largest weight); a blended seam snaps, it does not fade.
+- Joint index == node slot (`layout().nodeTable()`), so a subtree is `parentSlots()` walked up.
+- Set, it replaces `uvOffset` for that instance.
+
+### Paint
+
+Pattern layer shared by every model: memory = paints + models, painted copies stay one batch.
+
+```java
+Paint woodland = PaintArray.texture(id("textures/paint/woodland.png"), 6.0f); // tiling, blocks per repeat
+Paint olive = PaintArray.solid(0x4B5320);
+Matrix4f[] rest = gltf.restPalette();                                          // once per model
+if (gltf.paintable() && !ShaderPacks.inUse()) {                               // every frame:
+    instance.paint(woodland, gltf.paintReference(), BoneBuffer.getInstance().addSharedPalette(rest, gltf.jointCount()));
+}                                                                              // Paint.NONE = authored
+DirectRenderer.submit(gltf, palette, morphs, pose, light, overlay, argb, DirectPass.GUI, variant,
+        woodland, gltf.paintReference(), rest);                                // outside the level (GUI preview)
+```
+
+- `addSharedPalette`: same array (identity) => one staging per frame for every instance. One cached `rest` per model, not per instance.
+- Mask: `<base>_paint.png` beside a base colour. Alpha = coverage; rgb = colour the base was painted in.
+- Masked texel => `base * paint / reference`, `reference` = coverage-weighted mean mask rgb, one per model.
+- Pattern: triplanar at the vertex's rest-pose model position (rest palette x pre-skin vertex) => pinned to its part. Posed position FORBIDDEN: a turning turret swims through the pattern. Face normal from derivatives.
+- Variant base `X` => mask `X_paint` if present, else the model's.
+- `<mask>_solid.png` (optional): red >= 128 => paint's mean colour (top mip) instead of its pattern, shading kept.
+- Atlas byte: emissive alpha = `120c` solid, `136 + 119c` pattern; nearest-sampled, 121..135 gap absorbs BC7 error.
+- `paintable()` false (no mask, or a mesh off the banded sheet) => painting draws garbage.
+- Shader pack => fragment stage dropped => painted vertex outputs reach the pack raw. Skip paint there.
+- Painted => instance tint rgb ignored (overlay carries the reference); alpha kept.
+- `PaintArray.clear()` on reload invalidates every `Paint`. Layers `-Dgemrender.paintsize` (512)^2, unit 19.
 
 ### Reloads and failures
 
@@ -436,6 +481,80 @@ question of how much it varies:
   whether that is one layer or four.
 
 The counting argument in `AnimationPhase.snap` applies unchanged, once per layer.
+
+### Blending: crossfades, masks, additive layers
+
+Layers above overwrite in order. `AnimationBlend` weights them. Package `com.wf.gemrender.gltf.blend`.
+
+| Type | Role |
+|---|---|
+| `AnimationBlend` | per-instance layer stack, refilled per frame: `override(clip, t, w[, mask])`, `additive(clip, t, w, mask, reference)`, `sync(layer, group)`. Grows once, then allocates nothing |
+| `BlendMask` | per-node weight in `[0,1]`: `ALL`, `subtree(table, names...)`, `nodes(...)`, `weights(...)`, `drivenBy(table, clip)`, `complement(table)`. Immutable; build once per model |
+| `AdditiveReference` | additive basis: `rest(table)`, `frame(table, clip, t)`. Build once |
+| `Crossfade` | per-instance transitions: `play(clip, now, fade, curve[, clipTime, speed, loop])`, `write(now, blend[, weight, mask])`, `fading(now)` |
+| `FadeCurve` | `LINEAR`, `SMOOTH` (`3f^2 - 2f^3`), `INERTIAL` |
+| `BlendEvaluator` | `evaluate(table, blend, state, scratch)`: blend -> node state (external-pose path, section 4) |
+
+Where it plugs in:
+
+| Path | Call |
+|---|---|
+| Block entity | `PoseCache.pose(layout, bounds, morphs, blend, lod)` in place of the clip/time form |
+| Entity | override `GemRenderEntityVisual.blend(partialTick, blend)`, fill, return `true`; `animate` still abstract: pose when `blend` returns `false` |
+| Item | `ItemAppearance.blend(stack, context, partialTick, out)`, fill, return `true`; clip/seconds then unused. 26.1: called again for atlas redraw (`AnimationBlend.moves()`) => pure, no `play` |
+| Own palette | `GltfPose.evaluate(layout, blend, palette, morphs, morphOut, scratch)`, or `DirectRenderer.submit(model, blend, ...)` |
+| Rigid parts | `PartsPose.evaluate(model, blend, out, only, scratch)` |
+| Armour | none: pose is the wearer's |
+
+Single-clip API unchanged; a blend is opt-in per call site.
+
+Math, per node, `e_i = weight_i * mask_i(node)`:
+
+- Override layers: one normalized weighted average. `T, S, morph = sum(e_i x_i) / max(1, sum e_i)`; `sum e_i < 1` => rest fills the remainder; `sum e_i == 0` => rest.
+- Rotation: same sum, each quaternion flipped into the running sum's hemisphere, then normalized (nlerp).
+- Additive layers after, in order: `T += e (T - T_ref)`; `S *= 1 + e (S / S_ref - 1)` (`|S_ref| <= 1e-6` => skipped); `R = R * nlerp(I, conj(R_ref) R, e)` (bone-local, right side); `morph += e (w - w_ref)`. `e > 1` exaggerates.
+- Crossfade weights, newest first: `w_k = remaining * curve(progress_k)`, oldest takes the rest. Interrupted fade continues from the pose on screen.
+- `INERTIAL`: outgoing entries dropped at `play`; offset `source(now) - target(now)` per node (T, S vectors; R axis-angle; each morph weight) decays by a quintic (Bollo, GDC 2018) from the source velocity `(source(now) - source(now - h)) / h`, `h = 1/120 s`, projected on the offset, clamped `<= 0`. Newest entry younger than `h` => `h = -1/120 s` (forward): backward probe would predate it. One clip sampled instead of two.
+- `sync(layer, group)`: followers take the heaviest layer's phase fraction over their own duration.
+
+Layering one clip over another ("upper body replaces") = the base carries the complement mask, so the pair sums to 1 per node:
+
+```java
+BlendMask upper = BlendMask.subtree(table, "spine2");       // once
+BlendMask lower = upper.complement(table);                   // once
+AdditiveReference recoilBasis = AdditiveReference.frame(table, recoil, 0.0f);
+
+blend.clear();
+legs.write(now, blend, 1.0f, lower);                         // a Crossfade
+blend.override(aim, aimTime, 1.0f, upper);
+blend.additive(recoil, recoilTime, 1.0f, upper, recoilBasis);
+PoseCache.Pose pose = PoseCache.getInstance().pose(gltf.layout(), gltf.bounds(), gltf.morphs(), blend, lod);
+```
+
+Sharing:
+
+- Key per layer: clip, time bucket (`quantumSeconds(lod)`), weight quantized to `1 / PoseCache.weightSteps(lod)` (`max(16, 256 >> lod)`), mask, mode, reference. Evaluated from the quantized values, so sharers get the same pose.
+- Layers quantizing to weight 0 drop out; one full-weight `ALL` override left => the single-clip key, shared with single-clip callers. A finished fade costs what the clip costs.
+- Active `INERTIAL` offset => per-instance, never keyed: no key copy, no map entry; `Pose` recycled per thread next frame.
+- Pose still claimed every frame; `PoseLod` coarsens time and weight.
+
+Cost, palette evaluation (sample + compose), every node keyframed on T/R/S, Ryzen 9 7900X, JDK 21 (`BlendBench`, `-PblendBench=<file>`):
+
+| nodes | single clip | 1 layer `w=0.6` | 2 layers | 2 layers split by subtree mask | 4 layers (3 override + 1 additive) |
+|---:|---:|---:|---:|---:|---:|
+| 50 | 3.7 us | 1.13x | 1.79x | 1.21x | 3.44x |
+| 200 | 14.7 us | 1.13x | 1.81x | 1.29x | 3.57x |
+
+- Clip sampling is 82% of a single-clip pose, compose 17%. Blend arithmetic ~0.5 us / 50 nodes; cost ~= layers x sample.
+- Masked layer samples only drivers whose node has mask weight > 0 (drivers with `offset() == -1` always run).
+- nlerp vs slerp, 2-way blend, poses `x` degrees apart, worst angle: 30 => 0.03 deg, 90 => 0.92 deg, 170 => ~6.6 deg; 0 at both ends. slerp not needed.
+
+Traps:
+
+- `Crossfade.write` prunes finished entries: `now` must not run backwards on one instance.
+- Mask, `AdditiveReference` and `Crossfade` inertialization bound to their `NodeTable` (identity); evaluated on another table => `IllegalArgumentException`. `BlendMask.ALL` fits any. Clips unchecked.
+- Layer times are clip-local, not wrapped (`Crossfade` wraps its own when `loop`).
+- Override weight clamped to `[0,1]`; NaN/negative/infinite weight or time => `IllegalArgumentException`.
 
 ### Attaching something to a bone
 
@@ -1131,24 +1250,38 @@ if you enable a scissor immediately after drawing GemRender items and before any
 
 ## 7. Particles
 
-The same idea as section 1, applied to a different problem. A particle's position, size, colour and
-spin are a **closed form of its age**: given where it was born, how fast, and when, the shader can
-work out where it is now. So nothing about a particle is written per frame. The CPU writes
-forty-eight bytes once, at spawn, and never touches that particle again.
+Position, size, colour, spin = closed form of age. CPU writes 64 bytes once at spawn; nothing per frame.
+3 000 particles = 3 000 cull invocations + one draw, zero Java.
 
-That is what makes the count stop mattering. Three thousand particles cost three thousand cull
-invocations and one draw, and zero Java.
-
-### The four pieces
+### Pieces
 
 | | |
 |---|---|
-| `GemRenderParticleTypes` | `BILLBOARD`, `MESH`, and `custom(vert, cull)` for your own shader |
-| `ParticleStyle` | the curves every particle in a family shares: drag, gravity, how it grows, how it fades, and what it does when it hits a block. Registered once, at most 256 of them |
-| `ParticleEmitter` | owns a block of slots and a spawn cursor. Lives as long as the effect does, **not** as long as the visual |
-| `ParticlePool` | the Flywheel side: one instance per slot, created in the visual, deleted with it |
-| `ContactResponse` | `NONE`, `STOP`, `BOUNCE`, `DIE` — what a particle does when its flight runs into the world |
-| `GemRenderParticleTypes` | `BILLBOARD` for camera-facing quads, `MESH` for a model oriented along its own velocity |
+| `GemRenderParticleTypes` | instance types below; `custom(vert, cull)` for your own shader |
+| `ParticleStyle` | per-family curves: drag, gravity, growth, fade, contact response. Max 256 |
+| `ParticleEmitter` | slot block + spawn ring. Lifetime = the effect's, **not** the visual's |
+| `ParticlePool` | Flywheel side: one instance per slot; created in the visual, deleted with it |
+| `ContactResponse` | `NONE`, `STOP`, `BOUNCE`, `DIE` |
+| `ParticleLook` | per-particle colour + light, one int |
+
+### Instance types
+
+Same buffer, style, emitter; vertex shader differs.
+
+| type | shape | spawn with | model |
+|---|---|---|---|
+| `BILLBOARD` | camera-facing quad, rolled by `spin` | `spawn` | `additive` / `translucent` / `cutout` / `sprite` |
+| `MESH` | model, +Y along velocity, rolled about it | `spawn` | any `Model` |
+| `STREAK` | camera-facing quad along motion; head on the particle, length `max(streak * speed, width)`; settled => `width` dot | `spawn`; style `.streak(seconds)` | `additive(texture)`, v = 0 at the head |
+| `DECAL` | quad flat on a plane; never moves | `spawnDecal(x, y, z, nx, ny, nz, life, size, roll, look)` | `decal(texture)` |
+| `BODY` | model tumbling end over end; rests lying down, +Y horizontal | `spawn(probe, ...)` with a contact style | `rigid(gltfModel[, bake])` |
+
+- `DECAL`: spawn velocity = surface normal, `spinPhase` = roll; style motion ignored.
+- `BODY`: tumbles at `spin` about a horizontal axis, yawed from horizontal spawn velocity by `spinPhase`;
+  rest angle snaps to nearest `pi/2 + k*pi`, eased over the rebound leg (`STOP`: at contact). Attitude
+  assumes a floor; a rebound ending on a wall still lies "flat".
+- `MESH` keeps the landing velocity after rest (attitude); `STREAK` reads `gemrender_particleMotion`
+  (zero once settled).
 
 ### Registering a style
 
@@ -1164,21 +1297,13 @@ private static final int EXHAUST = ParticleBuffer.getInstance()
                 .build());
 ```
 
-The table holds 256 styles and the whole of it is 20 KiB whether it is full or holds one, so it is
-generous on purpose — but it is still finite, and running out throws. A caller that caches a style per
-tint, or per tint *and* light level, climbs faster than it looks like it should: be ready to fall back
-to a near-enough style rather than let an exception out of a particle spawn.
-
-`dragFromPerTickFactor` and `gravityFromPerTickDelta` exist because most existing particle code is
-written as a per-tick loop – `v *= 0.9`, `vy += 0.004`. Those are a geometric series and a constant
-acceleration, so they have exact closed forms; the two helpers convert the loop's constants into the
-per-second ones the shader wants. **Everything the API takes is per second**, including velocity.
-A per-tick delta multiplied by 20 is a per-second one.
+- 256 styles, 24 KiB; full => throws. Per tint / light level: [`ParticleLook`](#colour-and-light-per-particle), not a style each.
+- **All units per second**, velocity included. Per-tick loops (`v *= 0.9`, `vy += 0.004`) ->
+  `dragFromPerTickFactor`, `gravityFromPerTickDelta`; per-tick delta x 20 = per-second.
 
 ### Emitting
 
-The emitter belongs to the effect, because Flywheel destroys and rebuilds every visual when the
-render origin moves and the trail must not restart when it does.
+Emitter on the effect: Flywheel rebuilds every visual when the render origin moves; a trail must not restart.
 
 ```java
 public final class ExhaustEffect implements Effect {
@@ -1193,8 +1318,9 @@ public final class ExhaustEffect implements Effect {
 }
 ```
 
-`spawn` overwrites the oldest slot in the ring, so a pool never fills up and never allocates. A slot
-that has never been written reads as a dead particle and is culled.
+- `spawn` overwrites the oldest slot: never full, never allocates. Unwritten slot = dead, culled.
+- Ring sizing: `capacity == rate x life` wraps as the oldest dies (`-Pparticles=3000` settles ~2880
+  alive). Size 10-20% above.
 
 ### Drawing
 
@@ -1217,9 +1343,7 @@ public final class ExhaustVisual extends AbstractVisual
 }
 ```
 
-**Drawing from an atlas instead of a texture of your own.** A particle that is a chip of a block
-samples the terrain sheet, and which sprite it samples is fixed when the model is built rather than per
-particle — so it is baked into the mesh, and costs no room in the particle layout:
+Atlas sprite (block chips): sprite baked into the mesh, cached per sprite (one model, one draw per sprite):
 
 ```java
 TextureAtlasSprite sprite = ...;
@@ -1228,105 +1352,115 @@ Model chip = ParticleModels.sprite(
         InventoryMenu.BLOCK_ATLAS);
 ```
 
-Cached per sprite, so every chip off the same block shares a model and therefore a draw call.
+No `beginFrame`: per-frame variation belongs in the style or the closed form.
 
-There is no `beginFrame`. If you find yourself writing one, the thing you want to vary per frame
-probably belongs in the style or in the closed form instead.
+### Colour and light per particle
 
-### Mesh particles
+`look` = record's last float: `1 + (r5 << 19 | g6 << 13 | b5 << 8 | block << 4 | sky)`, max `2^24`, exact.
 
-`GemRenderParticleTypes.MESH` takes any Flywheel `Model` instead of the built-in quad and orients it
-so **the model's +Y points along its velocity**, with `spin` rolling it about that axis. Debris,
-casings, sparks with a length. Everything else – the style, the emitter, the pool – is identical.
+| | |
+|---|---|
+| `ParticleLook.NONE` (0) | style tint, style light |
+| `of(rgb, block, sky)` | tint *= rgb (565); light replaced |
+| `of(rgb)` | full bright |
+| `lit(level, x, y, z, rgb)` | block + sky light of the containing block, read once at spawn |
+| `blockColour(level, pos, state)` | vanilla `TerrainParticle` mean: sprite alpha-weighted mean x 0.6 x block tint; grass block untinted |
+
+- Light read at spawn: day/night follows (lightmap); drifting into shadow does not.
+- `blockColour`: sprite PNG decoded once per sprite (weak cache); call where the level is owned.
+- Stock shaders: `gemrender_particleLight(p, s)`, `gemrender_particleColor`. Custom shader reading
+  `s.light` ignores the look.
+
+```java
+int look = ParticleLook.lit(level, x, y, z, ParticleLook.blockColour(level, hitPos, state));
+emitter.spawn(x, y, z, vx, vy, vz, life, size, spin, 1.0f, look);
+```
+
+### Fading out
+
+`.fadeOut(u)`: alpha held at `alphaScale` until unit age `u`, then the `alpha` falloff over `[u, 1]`.
+`u = 0` (default): whole life. `BODY` scales by `1 - fade` instead (same window, same default); a
+casing wants e.g. `.fadeOut(0.85f)`.
+
+### Decals
+
+```java
+emitter.spawnDecal(hit.x, hit.y, hit.z, normal.x, normal.y, normal.z, life, 1.0f, roll,
+        ParticleLook.lit(level, hit.x + normal.x * 0.5, hit.y + normal.y * 0.5, hit.z + normal.z * 0.5,
+                ParticleLook.WHITE));
+```
+
+- Budget = emitter capacity: ring, oldest overwritten. No world-wide budget object.
+- Reach: `|spawn - emitter origin| <= DECAL_REACH` (2048) per axis, else `IllegalArgumentException`.
+  Offsets are float: half-ulp at 2048 = lift/16; at 16384 = lift/2 => z-fight. World-wide budget =
+  one decal emitter per region near the player (re-create when the player leaves it).
+- Z-fighting: `decal()` polygon offset (Flywheel `-1, -10`) + lift `1/512` along the normal. No depth
+  write, back faces culled.
+- Drawn before translucent terrain: a decal under water composites behind it.
+- Trap: quad overhangs block edges, unclipped. Keep size under the face or move the centre inward.
+
+### Rigid glTF particles
+
+`ParticleModels.rigid(model)`: loaded `GemRenderGltfModel` frozen at rest pose (skin palette applied,
+weights renormalised) into one particle mesh with the model's materials. `rigid(model, bake)`: `bake`
+after. Cached per model + bake; reload = new key.
+
+- Author: origin = centre, +Y = long axis (`BODY`, `MESH` orient +Y).
+- Pass half the thickness as `radius`: rests on, not in, the floor.
+- `GemRenderModels.handle(id).get()` non-null before building the visual.
+- Harness casing model and flash / dust / spark / bullet-hole textures live in the harness source set;
+  consumers ship their own.
 
 ### Contact
 
-A particle cannot discover a wall while it flies: it has no state to read, which is the trade that
-buys everything else on this page. What it can be is **told in advance**. The trajectory is a closed
-form, so the whole arc is knowable the moment the particle is born; sweeping it against the world
-once, at spawn, produces two ages that ride in the particle's own slot, and the flight is still a
-closed form evaluated in the vertex shader with nothing written per frame.
-
-Say what a contact means on the style:
+Predicted at spawn: arc swept against the world once; two ages + a face ride in the slot; flight still
+closed form.
 
 ```java
 private static final int RUBBLE = ParticleBuffer.getInstance()
         .registerStyle(ParticleStyle.builder()
                 .gravity(20.0f)
-                .stopsOnContact()                  // lands and stays, keeping the attitude it hit with
+                .stopsOnContact()
                 .build());
 ```
 
 | | |
 |---|---|
-| `stopsOnContact()` | comes to rest on the first block and holds there. Rubble, casings, gore |
-| `bouncesOnContact(restitution, friction)` | rebounds once, then settles where that rebound lands |
-| `diesOnContact()` | vanishes at the wall. Free: it is a particle with a shorter life |
-| *(nothing)* | flies through everything, and is never swept |
-
-Then spawn through the level rather than past it:
+| `stopsOnContact()` | rests on the first floor. Rubble, casings, gore. Wall/ceiling => dead drop, settles below |
+| `bouncesOnContact(restitution, friction)` | one rebound, settles where it lands |
+| `diesOnContact()` | life shortened to the contact. Free |
+| *(nothing)* | never swept |
 
 ```java
 emitter.spawn(level, x, y, z, vx, vy, vz, life, size);
-
-// A mesh particle has extent, so tell it how much, or it lands half inside the floor.
+// Mesh: centre rests `radius` off the surface.
 emitter.spawn(level, x, y, z, vx, vy, vz, life, size, spinPhase, tintScale, 0.35f);
 ```
 
-**The style decides whether the sweep happens at all.** A style with no response never touches the
-world, so adding the level to a spawn call costs nothing until you ask for something.
-
-For a burst in the thousands, hoist the probe. It remembers the blocks it has already looked at, and
-a thousand particles leaving one point walk mostly the same ground:
+- No response on the style => no sweep, level argument free.
+- Burst: hoist the probe (remembers blocks; one burst walks mostly the same ground). The level
+  overload keeps one probe while the clock stands still.
+- Reads blocks: **call on the thread that owns the level** (tick, event), never a visual constructor.
 
 ```java
 ParticleCollision.Probe probe = LevelContactProbe.of(level);
 for (int i = 0; i < 1000; i++) {
     emitter.spawn(probe, x, y, z, vx(i), vy(i), vz(i), life, size, 0.0f, 1.0f, 0.35f);
 }
-```
 
-`ParticleEmitter` already does this for you within a frame – the convenience overload keeps one probe
-for as long as the clock stands still – so the explicit form is for when you want to control the
-cache's lifetime yourself. Either way it reads blocks, so **call it from the thread that owns the
-level**: a tick or an event handler, never a visual's constructor.
-
-To find out where one ended up – a sound, a decal, a scorch mark, the burst a shattering particle
-leaves behind – every `spawn` hands back what its sweep found, so you do not have to predict twice:
-
-```java
 ParticleCollision.Contact contact = emitter.spawn(probe, x, y, z, vx, vy, vz, life, size, 0f, 1f, 0.35f);
 Vector3f restingPlace = ParticleCollision.positionAt(style, spawn, velocity, contact, contact.restAge(),
         new Vector3f());
 ```
 
-A `DIE` style records no contact – it shortens the life instead – so for one of those, "it hit
-something" is `contact.life() < the life you asked for`, and the moment it hit is `contact.life()`.
-
-**How finely the arc is swept.** Each chord is sized from the acceleration the closed form is applying
-*at that point* – the pull, less what drag is already taking back – against the same tenth-of-a-block
-sagitta. Measuring it locally rather than once at birth is what makes the sweep hold for a flight of
-any length: a particle still accelerating gets short chords for as long as it is, and one at terminal
-velocity is travelling in a straight line at a constant speed, so a single chord describes the whole
-rest of its flight exactly. Sizing the step once from the speed at birth and then stretching it to fit
-gets both halves wrong — and gets them wrong *silently*, because a chord that is crossed at a wildly
-varying speed maps its hit fraction to the wrong age, and the particle then freezes wherever the closed
-form really is at that age. In the air, usually, above the floor it was told it had reached.
-
-**What prediction cannot do**, all three of which follow from it being a prediction:
-
-- **Geometry that moves after the spawn.** A particle in flight when a wall is built lands where the
-  wall was not. A block *mined* mid-flight is the more common case and looks the same.
-- **More than one rebound.** Each is a separate arc to predict and to store; past the first, nobody is
-  counting.
-- **Exactness to better than the chord.** The arc is followed in straight segments sized so that no
-  chord cuts more than a tenth of a block off the curve. Contacts land within that.
+- `DIE` records no contact: hit <=> `contact.life() <` requested life; hit time = `contact.life()`.
+- Chord per step sized from the local acceleration (pull less drag) against a 0.1-block sagitta.
+  Birth-speed sizing FORBIDDEN: stretched chords map the hit fraction to the wrong age => particle
+  freezes mid-air. Terminal velocity => one chord for the rest of the flight.
+- Limits: geometry changed after spawn (built wall, mined block) ignored; one rebound; accuracy = one
+  chord (0.1 block).
 
 ### Your own particle shader
-
-The stock billboard evaluates one particular set of curves: exponential drag, linear growth, a power-law
-fade, a cool toward a floor. When your effect wants something else, do not ask for a field to be added
-here — declare your own instance type over the same buffer:
 
 ```java
 private static final InstanceType<ParticleInstance> FLAME = GemRenderParticleTypes.custom(
@@ -1334,9 +1468,7 @@ private static final InstanceType<ParticleInstance> FLAME = GemRenderParticleTyp
         ResourceLocation.fromNamespaceAndPath(MODID, "instance/cull/flame.glsl"));
 ```
 
-Those live in `assets/<your namespace>/flywheel/instance/`, and Flywheel finds them because it scans every
-namespace. Start by including this one, which gives you the record and style structs and every curve as a
-function you may use or ignore:
+Files in `assets/<namespace>/flywheel/instance/`; Flywheel scans every namespace.
 
 ```glsl
 #include "gemrender:particle.glsl"
@@ -1349,117 +1481,72 @@ void flw_instanceVertex(in FlwInstance i) {
 }
 ```
 
-The contract you must keep is small. The cull shader has to set `radius = -1e18` for a particle that
-`gemrender_particleAlive` rejects, or dead ring slots will draw. `spawnTime` and `life` mean what they say,
-because emitters and `aliveCount` read them. Everything else is yours: `sizeScale`, `spinPhase` and
-`tintScale` are three uninterpreted per-particle scalars, and the style's sixteen floats are whatever you
-decide — `ParticleStyle.of(float...)` writes a raw block, and the named builder is only the convention the
-stock shaders happen to use. WF-Ballistics reuses the two cool fields as a white-out start and span.
-
-You do not have to bind anything. `_gemrender_particles` is bound on every Flywheel program, so a shader in
-any namespace can read the buffer.
+Contract:
+- Cull: `radius = -1e18` when `!gemrender_particleAlive`, or dead ring slots draw.
+- `spawnTime`, `life` as named: emitters and `aliveCount` read them.
+- Yours: `sizeScale`, `spinPhase`, `tintScale`, `look` (per particle); the style's 24 floats
+  (`ParticleStyle.of(float...)`; the builder is the stock shaders' convention). WF-Ballistics reuses
+  the two cool fields as a white-out start and span.
+- Shape helpers: `gemrender_planeBasis`, `gemrender_decalCorner`, `gemrender_streakCorner`,
+  `gemrender_particleMotion`, `gemrender_bodyBasis`, `gemrender_particleFade`. Java mirror: `ParticleShapes`,
+  `ParticleCollision.motionAt`.
+- `_gemrender_particles` bound on every Flywheel program; nothing to bind.
 
 ### What a closed form cannot do
 
-No force that depends on another particle, and nothing that has to react to the world *after* it set
-off. Both need the previous frame's state, and a particle here has no state to read: that is the trade
-that buys the zero per-frame cost and the identical result on every backend. Wind, drag, gravity,
-buoyancy, growth and fade are all fine, because none of them need to know what happened last frame.
-
-Collision used to be on that list and no longer is, but it is worth being clear about why: contact is
-not simulated, it is **predicted at spawn** (see [Contact](#contact)) and then evaluated in closed form
-like everything else. That is what keeps it free per frame, and it is also exactly why a particle
-cannot notice a wall that appeared while it was in the air.
+No particle-particle forces; no reaction to world changes after spawn (both need last frame's state).
+Wind, drag, gravity, buoyancy, growth, fade fine. Contact is predicted, not simulated ([Contact](#contact)).
 
 ### Shader packs
 
-Under Iris neither of Flywheel's stock backends runs; the compatibility layer supplies an instancing
-one instead. Particles keep working, because the whole evaluation is in the instance vertex shader
-rather than in a compute pass. What is lost is GPU culling, which the instancing backend does not do
-at all – a dead particle there collapses to a zero-size quad instead of being thrown away, which
-costs four vertex shader invocations and no fragments.
+Iris: compat layer's instancing backend. Particles work (evaluation in the vertex shader). No GPU cull:
+dead particle = zero-size quad, 4 vertex invocations, no fragments.
 
 ### Choosing a transparency
 
-This is the only decision on this page that changes your frame rate by more than a rounding error, so
-make it deliberately.
+Only frame-rate decision on this page.
 
-`ParticleModels` offers three:
-
-- `additive(texture)` – one pass, order-independent by construction. Right for fire, muzzle flash,
-  tracers, sparks. Cannot darken, so at any real density it saturates to white.
-- `cutout(texture)` – `OPAQUE` plus an alpha test, so one pass, writes depth, and gets early-Z.
-  Keeps dark colours, which additive cannot. Costs hard quad edges instead of feathered ones.
-- `translucent(texture)` – `ORDER_INDEPENDENT`. The best-looking of the three and by far the most
-  expensive.
+| `ParticleModels` | passes | depth | use |
+|---|---|---|---|
+| `additive(texture)` | 1 | none | fire, flash, tracers, sparks. Cannot darken; saturates to white when dense |
+| `cutout(texture)` | 1, early-Z | writes | dust, exhaust, bulk. Keeps darks; hard quad edges |
+| `translucent(texture)` | OIT, 3 raster passes | OIT | best look, by far most expensive |
 
 #### Only two of the three can be ordered against water
 
-This is not a matter of taste, and it is the one way the cheap choice can look broken rather than
-plain. Flywheel draws its instances after entities and **before** vanilla's translucent terrain, so a
-particle over a lake is drawn before the lake is.
+Flywheel draws after entities, **before** vanilla translucent terrain.
 
-- `cutout` is right by construction. It is opaque where it draws at all, so it writes depth honestly:
-  water behind it is correctly rejected, water in front of it is correctly drawn over it.
-- `translucent` is right because `WaterSplit` splits it. The OIT stack is cut at the water surface and
-  each half composites on its own side of it.
-- **`additive` has no right answer.** It is blended, so writing depth would delete the water behind it
-  — a puff-shaped hole with the lake bed showing through, with the hard edges of the quads rather than
-  the soft edges of the sprite. It therefore writes none (`WriteMask.COLOR`), which means the water
-  pass paints over it instead: an additive glow in front of a water surface is dimmed by it, and a
-  bright one over a thick surface disappears. That is a misordering rather than an erasure, and it is
-  the better of the two, but it is still wrong.
+- `cutout`: correct (opaque where drawn, honest depth).
+- `translucent`: correct via `WaterSplit` (OIT stack cut at the water surface).
+- `additive`: wrong either way. Depth write => puff-shaped hole in the water; so `WriteMask.COLOR`
+  => water paints over it (dimmed; bright glow over thick water vanishes).
 
-So: additive is for what a misordering does not matter to — a muzzle flash, a spark, something at the
-player's own position — and for anything that has to read correctly over water, pick one of the other
-two. A smoke trail is `translucent`; a dust plume is `cutout`.
+Additive only where misordering is invisible (muzzle flash, spark, at the player). Smoke trail
+`translucent`; dust plume `cutout`. Blended materials write no depth; occluding => `cutout`.
 
-Blended particle materials write no depth at all, for the same reason. If you want a blended particle
-to occlude, you want `cutout`.
-
-For exhaust and dust – many particles, mostly not the thing the player is looking at – use `cutout`.
-Push the alpha test up (`ParticleModels.billboard(texture, Transparency.OPAQUE, CutoutShaders.HALF)`)
-and let the texture's own alpha carve the silhouette rather than scaling alpha down in the style;
-a low `alphaScale` with a high threshold discards everything, and a low threshold gives you visible
-squares.
+Cutout tuning: raise the alpha test (`ParticleModels.billboard(texture, Transparency.OPAQUE,
+CutoutShaders.HALF)`), let texture alpha carve the silhouette. Low `alphaScale` + high threshold =>
+all discarded; low threshold => visible squares.
 
 ### Cost
 
-Per spawn: one 64-byte write. Per frame, per particle: nothing on the CPU. `instanceWrites=0` – no
-instance is rewritten after the frame it was created in – and the only per-frame work left is one
-`glBufferSubData` per run of dirty pages, which measures at 1 µs.
-
-**Contact costs only at spawn**, and only for a style that asked for it. A burst of a thousand
-colliding particles sweeps in **1.22 ms**, once, on the thread that spawned it; the frame after, they
-are the same zero-cost particles as any other. Two things are doing that work:
+- CPU: one 64-byte write per spawn; per frame nothing (`instanceWrites=0`); one `glBufferSubData` per
+  dirty page run, ~1 us.
+- Contact: spawn only, only for styles asking for it. 1 000 colliding spawns:
 
 | | 1 000 colliding spawns |
 | --- | --- |
 | sweep, walking probe | **1.22 ms** |
 | sweep, one `BlockGetter.clip` per segment | 1.84 ms |
-| blocks the level was asked about, walking probe | **2 233** |
-| blocks the level was asked about, clipping | 46 500 |
-| blocks asked about at 2 000 particles | 2 507 (**1.12x**, not 2x) |
+| blocks asked, walking probe | **2 233** |
+| blocks asked, clipping | 46 500 |
+| blocks asked at 2 000 particles | 2 507 (**1.12x**, not 2x) |
 
-The last row is the one that matters for scale: what the level is asked is bounded by the *volume the
-burst covers*, not by how many particles are in it, because they all cross the same ground and the
-probe remembers it. Doubling the particles costs 12% more lookups. The other lever is the arc itself –
-segments are sized by how hard the path is bending **at each point along it**, so the straight parts of
-a flight are crossed in one long chord and only the parts that actually arc pay for the arc. A particle
-that has reached terminal velocity is accelerating at nothing, and the whole rest of its flight is one
-segment however long it lives.
+- Lookups bounded by burst volume, not count. Source: `ParticleSweepScaleTest`.
+- In game, 1920x1080: 49-explosion volley, ~1 500 colliding mesh particles (block geometry): **163 fps
+  vs 169 empty**, GPU 8-10%. Spawn frame (196 models baked, 1 500 arcs) included.
 
-`ParticleSweepScaleTest` is where those numbers come from and will tell you if they move.
-
-In a running game, measured on the same machine at 1920x1080: a volley of 49 explosions throwing about
-**1 500 colliding mesh particles** — chunks of real block geometry, not billboards — held **163 fps
-against a 169 fps empty-scene baseline**, GPU load unchanged at 8-10%. The spawn frame is the expensive
-one and it is the one in that number: 196 models baked and 1 500 arcs swept in a single tick. Every
-frame after it is free.
-
-That leaves the GPU, and there the whole cost is which `Transparency` you picked, not how many
-particles you have. Measured on one machine (RX 7900 XTX, Mesa 26.2, `indirect` backend) at
-846x1020, sampling 200 ticks:
+GPU: RX 7900 XTX, Mesa 26.2, `indirect`, 846x1020, 200 ticks.
 
 | row | frames/s |
 | --- | --- |
@@ -1473,25 +1560,10 @@ particles you have. Measured on one machine (RX 7900 XTX, Mesa 26.2, `indirect` 
 | 300 000, `cutout` | 333 |
 | 300 000, `cutout`, `-PparticleSize=0.15` | 1994 |
 
-**The instancer is never the bottleneck.** 30 000 particles on a one-pass blend are indistinguishable
-from an empty scene, and the last two rows are the proof that even 300 000 is not the instancer's
-limit: they draw the same 288 000 live particles, the same instances, the same vertices and the same
-buffer fetches, and differ only in how many pixels the quads cover. Shrinking them wins 6x.
-
-Every cost on this page is fill. There are exactly two levers on it:
-
-- **How many passes rasterise the geometry.** `ORDER_INDEPENDENT` costs 3x `cutout` at the same 3 000
-  particles, because Flywheel's moment-based OIT rasterises three separate times – depth range,
-  coefficients, evaluate – into full-resolution `RGBA16F` targets.
-- **How many pixels the particles cover.** Size, distance, and how much of the screen the effect
-  fills. `-PparticleSize=0.15` took the 3 000 OIT row from 649 to 1838 fps and the 300 000 cutout row
-  from 333 to 1994.
-
-Particle count barely enters into either. If a particle effect is costing you frames, it is covering
-too many pixels or going through too many passes; adding a budget on the count is treating the wrong
-number.
-
-Reproduce and tune any of it with:
+- Instancer never the bottleneck: last two rows = same 288 000 live instances, differ only in covered
+  pixels; 6x.
+- Cost = fill. Levers: raster passes (OIT 3x `cutout`) and covered pixels (`-PparticleSize=0.15`:
+  3 000 OIT 649 -> 1838 fps; 300 000 cutout 333 -> 1994). Count budget treats the wrong number.
 
 ```
 ./gradlew client -PspikeExit=400 -PquickPlay=spike -Ppitch=0 -Pparticles=3000 \
@@ -1501,83 +1573,60 @@ Reproduce and tune any of it with:
     -PparticleSpacing=0      # blocks between them, 0 stacks them on one spot
 ```
 
+### Cost per kind
+
+`-PparticleKinds=<kind> -PparticleKindCount=N` (harness), 1920x1080, RX 7900 XTX, `indirect`, camera 4-5
+blocks from the effect, 200 sampled ticks. `N` = target alive; spawn rate `N / life`.
+
+| kind | material | N | frame ms | emit us/tick | spawns/tick |
+|---|---|---:|---:|---:|---:|
+| none | | 0 | 0.36 / 0.52 | 2-4 | 0 |
+| decal | `decal` | 1k / 10k | 0.43 / 0.40 | 8 / 12 | 17 / 167 |
+| casing (`BODY`, bounce) | glTF opaque | 1k / 10k | 0.58 / 0.45 | 19 / 24 | 8 / 83 |
+| dust (`blockColour` + `lit`) | `translucent` | 1k / 10k | 0.58 / **1.92** | 14 / 61 | 31 / 312 |
+| flash | `additive` | 1k / 10k | 0.45 / 0.92 | 12 / 121 | 625 / 6250 |
+| smoke | `translucent` | 1k / 10k | **1.82 / 12.1** | 12 / 23 | 17 / 167 |
+| spark (`STREAK`, bounce) | `additive` | 1k / 10k | 0.43 / 0.42 | 38 / 236 | 56 / 556 |
+
+- Baseline drifted 0.36 -> 0.52 ms over the sweep; rows under ~0.6 ms are inside it.
+- Only OIT (`translucent`) rows cost: fill x 3 passes. Dust/smoke in bulk: `cutout`.
+- CPU per colliding spawn ~0.3-0.4 us (sweep, probe per tick); flash spawn ~0.02 us.
+
 ### The water split taxes order-independent particles
 
-GemRender's own `WaterSplit` resubmits every `ORDER_INDEPENDENT` draw a fourth time, so that
-Flywheel's OIT geometry interleaves per pixel with vanilla's translucent terrain **and with the
-clouds**. Particles are not
-exempt, and they pay it whether or not there is anything to interleave with: `-PwaterSplit=false`
-took the 3 000 `translucent` row from 655 to 878 fps and the 30 000 one from 98 to 152 fps – 34% and
-56%, in a scene with no water in it at all.
+`WaterSplit` resubmits every `ORDER_INDEPENDENT` draw a fourth time (interleave with translucent
+terrain and clouds), water or not. `-PwaterSplit=false`: 3 000 `translucent` 655 -> 878 fps, 30 000
+98 -> 152 (34%, 56%), no water in scene.
 
-Do not reach for the obvious fixes. Both are worse than they look:
-
-**Excluding particles from the resubmission** would be wrong – a particle in front of a water surface
-does have to composite after it – and it would not be particle-specific anyway. `GltfMaterial` gives
-every glTF `BLEND` material `ORDER_INDEPENDENT`, so translucent *models* take the identical path, and
-the split is load-bearing for them. Frozen-clock A/B on the glass row, `-PwaterColumn=8`, split on
-versus off: 56% of the models' pixels differ, by up to 176 of 255. That is not overhead, that is the
-feature working.
-
-**Skipping the split when the prepass found nothing** is safe – the same A/B with no water differs on
-0.16% of model pixels by at most 6 of 255, which is OIT dithering rather than a rendering change –
-but it is worth much less than it sounds. `WaterDepthPrepass` renders `RenderType.translucent()`,
-which is the whole vanilla translucent terrain layer and not just water: ice, stained glass, slime,
-honey, portals. In a real world some of it is nearly always on screen, so the guard would rarely
-fire. The numbers above are close to a best case for it, not a typical one.
-
-Two things do reliably avoid the tax: **Fabulous graphics**, where `modeActive()` is false and the
-split never runs at all, and not being on the `ORDER_INDEPENDENT` path in the first place. The second
-is the one you control, and the fill numbers above already recommend it on their own.
-
-Leaving the path costs you the ordering, though, and only one of the two exits keeps it: `cutout`
-writes depth and is correct against water without the split, while `additive` is neither split nor
-depth-writing and is simply drawn under the water. See "Only two of the three can be ordered against
-water" above before treating this as a free win.
+- Excluding particles from the resubmission FORBIDDEN: a particle in front of water must composite after
+  it; and glTF `BLEND` materials share the path (glass row, `-PwaterColumn=8`, split on vs off: 56% of
+  model pixels differ, up to 176/255).
+- Skip-when-prepass-empty: safe (no water: 0.16% pixels, <= 6/255, OIT dither) but rarely fires:
+  `WaterDepthPrepass` renders all of `RenderType.translucent()` (ice, stained glass, slime, honey,
+  portals).
+- Avoid the tax: Fabulous (`modeActive()` false, no split) or leave `ORDER_INDEPENDENT`. `cutout`
+  stays ordered against water; `additive` does not.
 
 ### Clouds are in the split too
 
-Water is not the only vanilla translucent surface drawn after Flywheel's composite. That composite
-writes the closest OIT depth with the depth mask on, and clouds are drawn much later in the frame, so
-before this a cloud behind an `ORDER_INDEPENDENT` model was depth-rejected and the model had plain sky
-behind it. The cloud surface is folded into the same prepass depth the water uses, so a cloud is now
-one more thing a model can be in front of or behind.
-
-It needs no extra pass. The cloud depth rides into the prepass on the full-screen copy that already
-seeds it with opaque depth, and the front half of the composite is split into the pixels with a cloud
-over them and the pixels without -- the ones without are composited exactly where they always were, and
-only the ones with wait until `AFTER_WEATHER`, by which time the cloud is down. What the fold costs is
-one more rasterisation of vanilla's cloud mesh, skipped entirely on a frame whose view does not reach
-the cloud layer at all.
-
-`-PcloudSplit=false` takes it back out and leaves the water split as it was; `-Pclouds=off` is the
-other half of the A/B. With no cloud in the level the two are the same picture to the pixel, measured.
-
-One residual, and it is the same one the water half accepts: there is **one split point per pixel**, so
-a fragment that is in front of the water and behind a cloud in the same pixel is composited against the
-nearer of the two. Clouds are far and water is not, so the two rarely contend.
+- Cloud surface folded into the water prepass depth: an OIT model can be in front of or behind a cloud.
+- No extra pass: cloud depth rides the opaque-depth seed copy; front half of the composite split by
+  cloud coverage; covered pixels wait for `AFTER_WEATHER`. Cost: one more cloud-mesh raster, skipped
+  when the view misses the cloud layer.
+- `-PcloudSplit=false` removes it; `-Pclouds=off` is the other A/B half. No cloud in level => identical
+  to the pixel (measured).
+- One split point per pixel: in front of water and behind a cloud in one pixel => composited against
+  the nearer.
 
 ### Time resolution
 
-`age` comes from `flw_renderSeconds`, which Flywheel writes as a **32-bit** float of
-`(ticks + partialTick) / 20`. That is a shared uniform, not something this instancer chooses, and its
-resolution decays with client uptime: about 0.25 ms after an hour, 8 ms after a day, 60 ms after a
-week. Particle motion stays correct – `spawnTime` is quantised on exactly the same grid, so `age` is
-still exact – but past roughly a day of uninterrupted uptime in one dimension it advances in visible
-steps. Every Flywheel shader that animates on `flw_renderSeconds` has the same bound.
-
-`ParticleStyle.FLOATS` and the 12-float record layout are given in `particle.glsl`, which is the
-authority – `ParticleMotion` is the same arithmetic in Java, kept in step by `ParticleMotionTest`,
-and is there for tests and for CPU-side code that needs to know where a particle is. The buffer is
-bound as `RGBA32F`, so both records read as whole `vec4`s: three fetches for a particle and four for
-a style, rather than 26 scalar ones. That was done expecting it to matter at high counts and it does
-not – it measures inside run-to-run noise at every count up to 300 000, because nothing here is ever
-fetch-bound. It is kept for being the simpler shader, not for being the faster one.
-
-One sizing note the harness row makes obvious: a pool is a ring, so if the spawn rate times the mean
-lifetime equals the pool size exactly, the ring wraps just as the oldest particle is dying and a few
-per cent get overwritten early. `-Pparticles=3000` settles at about 2880 alive for that reason. Size
-the pool ten to twenty per cent above `rate x life` if you want the full count on screen.
+- `age` from `flw_renderSeconds`: 32-bit float of `(ticks + partialTick) / 20`, shared Flywheel
+  uniform. Resolution: ~0.25 ms after 1 h uptime, 8 ms after 1 day, 60 ms after 1 week. `spawnTime`
+  on the same grid => `age` exact; motion steps visibly past ~1 day in one dimension.
+- Layout authority: `particle.glsl` (style 24 floats, record 16). Java mirror `ParticleMotion`,
+  held by `ParticleMotionTest`, `ParticleShapesGlTest`, `ParticleInstanceShadersGlTest`.
+- `RGBA32F` buffer: 4 fetches per particle, 6 per style. vec4 fetch vs scalar: inside noise up to
+  300 000; kept for simplicity.
 
 ---
 
@@ -1795,12 +1844,13 @@ The types a consumer actually touches.
 | `GemRenderGltfModel` | The imported asset: `model()`, `layout()`, `bounds()`, `morphs()`, `animations()`, `jointCount()` |
 | `GemRenderInstanceTypes.SKINNED` | The instance type to pass to `instancer(...)` |
 | `GemRenderInstance` | `pose`, `boneBase`, `morphBase`, `boneSphere`, plus colour and light |
-| `PoseCache` | `pose(layout, bounds, morphs, clip, time)`. The only supported way to get a `boneBase`. The `clips[]`/`times[]` overload layers several clips, each at its own instant |
+| `PoseCache` | `pose(layout, bounds, morphs, clip, time)`. The only supported way to get a `boneBase`. The `clips[]`/`times[]` overload layers several clips, each at its own instant; the `AnimationBlend` overload blends them |
+| `AnimationBlend`, `BlendMask`, `AdditiveReference`, `Crossfade`, `FadeCurve`, `BlendEvaluator` | weighted, masked, additive and crossfaded layers ([blending](#blending-crossfades-masks-additive-layers)) |
 | `AnimationPhase` | `scattered(clip, seed)`, `of(clip)`, `REST`, `timeAt(seconds)` |
 | `AnimationDrive` | The same, for a parameter instead of a clock. `cyclic(clip, unitsPerCycle)`, `ranged(clip, min, max)`, `timeAt(parameter)` |
 | `GltfAnimation` | A clip. `name()`, `duration()`, `loop(t)` |
 | `GemRenderPartsModel` | The rigid-part path (section 3). `animation(name)`, `partCount()`, `parts()`, `newTransforms()`, `drivenBy(clip)`, `withAncestors(driven)` |
-| `PartsPose` | `evaluate(model, clips, times, out, only, scratch)`. Several layers at once, each at its own instant |
+| `PartsPose` | `evaluate(model, clips, times, out, only, scratch)`. Several layers at once, each at its own instant; `evaluate(model, blend, out, only, scratch)` blended |
 | `RigBuilder` | A skeleton declared in code (section 4). `bone(...)`, `table()`, `attach(...)`, `build(material, clips)` |
 | `RigGeometry` | One mesh on its way into a rig: positions, normals, texture coordinates, indices |
 | `WavefrontObj` | `load(id)` reads a `.obj` as one `RigGeometry` per named group |
@@ -1810,22 +1860,24 @@ The types a consumer actually touches.
 | `ParticleBuffer` | `registerStyle(style)` returns the index every emitter of that family passes |
 | `ParticleEmitter` | `create(style, capacity, x, y, z)`, `spawn(...)`, `isIdle()`, `close()`. Held by the effect, not the visual |
 | `ParticlePool` | `new ParticlePool(ctx, emitter, type, model)` in the visual, `delete()` with it |
-| `GemRenderParticleTypes` | `BILLBOARD` and `MESH`, the two instance types to pass to `ParticlePool` |
-| `ParticleModels` | `additive`, `cutout` and `translucent` billboards; `cutout` is the cheap one, `additive` the one that cannot be ordered against water |
+| `GemRenderParticleTypes` | `BILLBOARD`, `MESH`, `STREAK`, `DECAL`, `BODY` to pass to `ParticlePool` |
+| `ParticleModels` | `additive`, `cutout` and `translucent` billboards; `cutout` is the cheap one, `additive` the one that cannot be ordered against water. `decal(texture)`, `rigid(gltfModel[, bake])` |
+| `ParticleLook` | per-particle colour + light: `of`, `lit`, `blockColour` |
 | `ParticleMotion` | the closed form in Java, for tests and for CPU-side code that needs a particle's position |
+| `ParticleShapes` | decal, streak and body attitude in Java, mirroring `particle.glsl` |
 | `GemRenderRopeTypes` | `ROPE`, the instance type to pass to `instancer(...)`, and `custom(vert, cull)` (section 8) |
 | `RopeInstance` | one rope: `between`, `sag`/`slack`/`length`, `radius`, `tiling`, `twist`, `sway`, `lightB`, `refresh` |
 | `RopeModels` | `solid`, `cutout` and `absorbance` tubes, each taking an optional `rings, sides` |
 | `RopeCurve` | the curve in Java: `point`, `tangent`, `frame`, `length`, `sagForLength`, `sagForSlack`, `sphere` |
 | `GemRenderItemRenderer` | items, in every context (section 6). `of(model, clip)`, `register(id, renderer)`, `get(id)`, `animates(stack, context)` |
-| `ItemAppearance` | what a stack looks like per context: `model`, `clip`, `seconds`, `transform`, `variant`, `tint` |
+| `ItemAppearance` | what a stack looks like per context: `model`, `clip`, `seconds`, `blend`, `transform`, `variant`, `tint` |
 | `GemRenderArmorModel` | worn armour. `prepare(entity, stack, slot)`, `DEFAULT_BONES` |
 | `ArmorAppearance` | which model a piece draws per slot: `model`, `variant`, `tint` |
 | `VariantUv` | one model's variant skins. `NONE`, and `GemRenderGltfModel.variant(i)` |
 
 ### The SKINNED instance layout
 
-One hundred and four bytes. Worth knowing only if you are writing your own instance type against the
+One hundred and twenty-four bytes. Worth knowing only if you are writing your own instance type against the
 same shaders; the writer must match exactly, because it writes raw memory and a mismatch produces wrong
 geometry rather than an error.
 
@@ -1838,6 +1890,11 @@ geometry rather than an error.
 | 16 | 16 | `boneSphere` | vec4, centre and radius |
 | 32 | 64 | `pose` | mat4 |
 | 96 | 8 | `uvOffset` | vec2, the variant's tile |
+| 104 | 4 | `jointUvBase` | unsigned int, in floats; `0xFFFFFFFF` = none ([per-joint variants](#per-joint-variants)) |
+| 108 | 4 | `paint` | unsigned int, layer; `0xFFFFFFFF` = none ([paint](#paint)) |
+| 112 | 4 | `paintScale` | float, repeats per block |
+| 116 | 4 | `paintReference` | unsigned int, `0xRRGGBB` |
+| 120 | 4 | `paintRestBase` | unsigned int, in matrices; the rest palette |
 
 Note what is absent: **overlay**. Stock instance types carry one because their vertex shaders assign
 it over the per-vertex value, and GemRender spends the per-vertex overlay on the morph set index, so

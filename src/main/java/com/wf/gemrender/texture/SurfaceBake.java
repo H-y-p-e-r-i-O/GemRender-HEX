@@ -32,6 +32,8 @@ public final class SurfaceBake implements AutoCloseable {
         NativeImage orm = read(maps.metallicRoughness());
         NativeImage occlusion = read(maps.occlusion());
         NativeImage emissive = read(maps.emissive());
+        NativeImage paint = read(maps.paint());
+        NativeImage solid = read(ModelTextures.sibling(maps.paint(), MaterialMaps.SOLID_SUFFIX));
 
         try {
             int width = size(base, normal, orm, occlusion, emissive, true);
@@ -41,7 +43,7 @@ public final class SurfaceBake implements AutoCloseable {
             out[0] = bakeBase(maps, base, occlusion, width, height);
             if (pbr) {
                 out[1] = bakeSurface(maps, normal, orm, width, height);
-                out[2] = bakeEmissive(maps, emissive, width, height);
+                out[2] = bakeEmissive(maps, emissive, paint, solid, width, height);
             }
             return new SurfaceBake(out, width, height);
         } finally {
@@ -50,6 +52,8 @@ public final class SurfaceBake implements AutoCloseable {
             close(orm);
             close(occlusion);
             close(emissive);
+            close(paint);
+            close(solid);
         }
     }
 
@@ -104,7 +108,12 @@ public final class SurfaceBake implements AutoCloseable {
         return out;
     }
 
+    /**
+     * Alpha = paint coverage c (mask alpha, else 0): pattern => 136 + 119c, solid ({@code _solid} red >= 128)
+     * => 120c. Nearest-sampled; the 121..135 gap absorbs BC7 error. Decoded by {@code paint.glsl}.
+     */
     private static NativeImage bakeEmissive(MaterialMaps maps, @Nullable NativeImage emissive,
+                                            @Nullable NativeImage paint, @Nullable NativeImage solid,
                                             int width, int height) {
         NativeImage out = new NativeImage(width, height, false);
         for (int y = 0; y < height; y++) {
@@ -114,10 +123,18 @@ public final class SurfaceBake implements AutoCloseable {
                         scale(red(pixel), maps.emissiveR()),
                         scale(green(pixel), maps.emissiveG()),
                         scale(blue(pixel), maps.emissiveB()),
-                        255));
+                        paint == null ? 0 : coverage(alpha(sample(paint, x, y, width, height)),
+                                solid != null && red(sample(solid, x, y, width, height)) >= 128)));
             }
         }
         return out;
+    }
+
+    private static int coverage(int alpha, boolean solid) {
+        if (alpha == 0) {
+            return 0;
+        }
+        return solid ? Math.round(alpha * 120 / 255.0f) : 136 + Math.round(alpha * 119 / 255.0f);
     }
 
     private static int sample(NativeImage from, int x, int y, int width, int height) {

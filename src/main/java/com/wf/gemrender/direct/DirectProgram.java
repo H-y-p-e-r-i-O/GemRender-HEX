@@ -5,6 +5,7 @@ import com.wf.gemrender.Ids;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.render.BoneBuffer;
+import com.wf.gemrender.texture.PaintArray;
 import com.wf.gemrender.render.MorphBuffer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
@@ -70,6 +71,11 @@ final class DirectProgram {
         return shader;
     }
 
+    /** Flywheel resolves {@code #include}; this concatenation does not. */
+    private static String include(String source) {
+        return source.replaceAll("(?m)^#include .*$", "");
+    }
+
     private static String resource(String namespace, String path) throws IOException {
         ResourceLocation id = Ids.of(namespace, path);
         try (InputStream in = Minecraft.getInstance()
@@ -93,7 +99,9 @@ final class DirectProgram {
 
             program = link("direct",
                     VERSION + skinning + morph + resource(GemRender.MOD_ID, "shaders/direct.vert"),
-                    VERSION + resource(GemRender.MOD_ID, "shaders/direct.frag"));
+                    VERSION + resource(GemRender.MOD_ID, "flywheel/paint_pack.glsl")
+                            + include(resource(GemRender.MOD_ID, "flywheel/paint.glsl"))
+                            + resource(GemRender.MOD_ID, "shaders/direct.frag"));
 
             modelViewLoc = glGetUniformLocation(program, "_gr_modelView");
             projectionLoc = glGetUniformLocation(program, "_gr_projection");
@@ -108,6 +116,7 @@ final class DirectProgram {
             glUniform1i(glGetUniformLocation(program, "_gemrender_bones"), BoneBuffer.direct()
                     .unit());
             glUniform1i(glGetUniformLocation(program, "_gemrender_morphs"), MorphBuffer.TEXTURE_UNIT);
+            glUniform1i(glGetUniformLocation(program, "_gemrender_paint"), PaintArray.TEXTURE_UNIT);
             GlStateManager._glUseProgram(0);
 
             created = true;

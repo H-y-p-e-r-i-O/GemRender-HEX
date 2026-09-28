@@ -16,6 +16,19 @@ public final class GemRenderParticleTypes {
 
     public static final InstanceType<ParticleInstance> MESH = build("particle_mesh");
 
+    /** Flat on a surface; spawn with {@link ParticleEmitter#spawnDecal}. Draw with {@link ParticleModels#decal}. */
+    public static final InstanceType<ParticleInstance> DECAL = build("particle_decal");
+
+    /** Camera-facing quad stretched along the velocity; length from {@link ParticleStyle.Builder#streak}. */
+    public static final InstanceType<ParticleInstance> STREAK = build("particle_streak");
+
+    /**
+     * A model that tumbles end over end about a horizontal axis and comes to rest lying down: +Y ends
+     * horizontal. {@code spinPhase} yaws the tumble axis and offsets the start angle. Casings, shells, debris
+     * with a long axis. {@link ParticleModels#rigid} turns a glTF into one.
+     */
+    public static final InstanceType<ParticleInstance> BODY = build("particle_body");
+
     private GemRenderParticleTypes() {
     }
 

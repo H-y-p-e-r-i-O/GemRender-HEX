@@ -5,6 +5,12 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.world.level.BlockGetter;
 
 public final class ParticleEmitter {
+    /**
+     * Decal offset bound. Float offset from origin: half-ulp at 2048 = 2^-13 = {@link ParticleShapes#DECAL_LIFT}/16;
+     * at 16384 it equals half the lift => z-fight.
+     */
+    public static final int DECAL_REACH = 2048;
+
     private final int style;
 
     private final int base;
@@ -19,9 +25,7 @@ public final class ParticleEmitter {
 
     private boolean closed;
 
-    // The probe caches what it learned about the world, which is what makes a burst of a thousand affordable
-    // -- they all sweep the same ground. Kept only while the clock stands still, so a cache can never outlive
-    // the frame it was taken in and answer for a block that has since been mined.
+    // Probe cache kept only while the clock stands still: an older cache answers for blocks since mined.
     private ParticleCollision.Probe probe;
 
     private BlockGetter probeLevel;
@@ -66,16 +70,45 @@ public final class ParticleEmitter {
     public ParticleCollision.Contact spawn(double x, double y, double z, double velocityX, double velocityY,
                                            double velocityZ, float life, float sizeScale, float spinPhase,
                                            float tintScale) {
+        return spawn(x, y, z, velocityX, velocityY, velocityZ, life, sizeScale, spinPhase, tintScale,
+                ParticleLook.NONE);
+    }
+
+    /** @param look {@link ParticleLook} packing: per-particle colour and light */
+    public ParticleCollision.Contact spawn(double x, double y, double z, double velocityX, double velocityY,
+                                           double velocityZ, float life, float sizeScale, float spinPhase,
+                                           float tintScale, int look) {
         ParticleCollision.Contact contact = ParticleCollision.none(life);
-        write(x, y, z, velocityX, velocityY, velocityZ, sizeScale, spinPhase, tintScale, contact);
+        write(x, y, z, velocityX, velocityY, velocityZ, sizeScale, spinPhase, tintScale, contact, look);
         return contact;
+    }
+
+    /**
+     * A {@link GemRenderParticleTypes#DECAL}: flat on the plane through {@code (x, y, z)} facing
+     * {@code (normalX, normalY, normalZ)}, rolled by {@code roll}. Never swept, never moves.
+     *
+     * @throws IllegalArgumentException {@code (x, y, z)} more than {@link #DECAL_REACH} from {@link #origin()} on
+     *                                  any axis
+     */
+    public void spawnDecal(double x, double y, double z, double normalX, double normalY, double normalZ, float life,
+                           float sizeScale, float roll, int look) {
+        requireDecalReach(origin, x, y, z);
+        spawn(x, y, z, normalX, normalY, normalZ, life, sizeScale, roll, 1.0f, look);
+    }
+
+    static void requireDecalReach(Vec3i origin, double x, double y, double z) {
+        if (Math.abs(x - origin.getX()) > DECAL_REACH || Math.abs(y - origin.getY()) > DECAL_REACH
+                || Math.abs(z - origin.getZ()) > DECAL_REACH) {
+            throw new IllegalArgumentException("decal at (%s, %s, %s) beyond %d blocks of emitter origin %s"
+                    .formatted(x, y, z, DECAL_REACH, origin));
+        }
     }
 
     /**
      * Spawns a particle that knows what it is going to run into.
      *
      * <p>The arc is swept against {@code level} once, here, and what the sweep finds rides in the particle's
-     * own slot — so the flight still costs nothing per frame, and a style with no
+     * own slot, so the flight still costs nothing per frame, and a style with no
      * {@link ContactResponse} does not pay for the sweep at all.
      *
      * <p>Reads blocks, so call it from the thread that owns the level.
@@ -93,7 +126,14 @@ public final class ParticleEmitter {
                                            double velocityY, double velocityZ, float life, float sizeScale,
                                            float spinPhase, float tintScale, float radius) {
         return spawn(probeFor(level), x, y, z, velocityX, velocityY, velocityZ, life, sizeScale, spinPhase,
-                tintScale, radius);
+                tintScale, radius, ParticleLook.NONE);
+    }
+
+    public ParticleCollision.Contact spawn(BlockGetter level, double x, double y, double z, double velocityX,
+                                           double velocityY, double velocityZ, float life, float sizeScale,
+                                           float spinPhase, float tintScale, float radius, int look) {
+        return spawn(probeFor(level), x, y, z, velocityX, velocityY, velocityZ, life, sizeScale, spinPhase,
+                tintScale, radius, look);
     }
 
     /**
@@ -103,7 +143,7 @@ public final class ParticleEmitter {
      * at, and a thousand particles leaving one point walk mostly the same ground. Build one with
      * {@link LevelContactProbe#of}, spawn the burst through it, and drop it.
      *
-     * @return what the sweep found, so a caller can put something of its own where the particle ends up — a
+     * @return what the sweep found, so a caller can put something of its own where the particle ends up: a
      *         sound, a decal, or the burst a shattering particle leaves behind. Feed it to
      *         {@link ParticleCollision#positionAt} with the same spawn state to get the place. A particle the
      *         emitter declined to write (it is closed, or the life came back non-positive) still reports its
@@ -112,6 +152,14 @@ public final class ParticleEmitter {
     public ParticleCollision.Contact spawn(ParticleCollision.Probe probe, double x, double y, double z,
                                            double velocityX, double velocityY, double velocityZ, float life,
                                            float sizeScale, float spinPhase, float tintScale, float radius) {
+        return spawn(probe, x, y, z, velocityX, velocityY, velocityZ, life, sizeScale, spinPhase, tintScale, radius,
+                ParticleLook.NONE);
+    }
+
+    public ParticleCollision.Contact spawn(ParticleCollision.Probe probe, double x, double y, double z,
+                                           double velocityX, double velocityY, double velocityZ, float life,
+                                           float sizeScale, float spinPhase, float tintScale, float radius,
+                                           int look) {
         ParticleStyle particleStyle = ParticleBuffer.getInstance()
                 .style(style);
 
@@ -120,7 +168,7 @@ public final class ParticleEmitter {
                 : ParticleCollision.predict(probe, particleStyle, x, y, z,
                 (float) velocityX, (float) velocityY, (float) velocityZ, life, radius);
 
-        write(x, y, z, velocityX, velocityY, velocityZ, sizeScale, spinPhase, tintScale, contact);
+        write(x, y, z, velocityX, velocityY, velocityZ, sizeScale, spinPhase, tintScale, contact, look);
         return contact;
     }
 
@@ -135,7 +183,8 @@ public final class ParticleEmitter {
     }
 
     private void write(double x, double y, double z, double velocityX, double velocityY, double velocityZ,
-                       float sizeScale, float spinPhase, float tintScale, ParticleCollision.Contact contact) {
+                       float sizeScale, float spinPhase, float tintScale, ParticleCollision.Contact contact,
+                       int look) {
         if (closed || contact.life() <= 0.0f) {
             return;
         }
@@ -150,7 +199,7 @@ public final class ParticleEmitter {
                         now,
                         (float) velocityX, (float) velocityY, (float) velocityZ,
                         contact.life(), style, sizeScale, spinPhase, tintScale,
-                        contact.contactAge(), contact.normal(), contact.restAge());
+                        contact.contactAge(), contact.normal(), contact.restAge(), look);
 
         cursor = (cursor + 1) % capacity;
         latestDeath = Math.max(latestDeath, now + contact.life());

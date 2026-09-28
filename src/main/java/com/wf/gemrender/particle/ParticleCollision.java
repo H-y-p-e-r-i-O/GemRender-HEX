@@ -8,7 +8,7 @@ import org.joml.Vector3f;
  * <p>A particle has no state to read, so it cannot discover a wall while it flies. What it can do is be told
  * in advance: the trajectory is a closed form, so the whole arc is knowable the moment the particle is born,
  * and walking it against the world costs one sweep at spawn instead of a test per particle per tick. What
- * comes out is a {@link Contact} — two ages and a face — and from then on the shader is still evaluating a
+ * comes out is a {@link Contact} (two ages and a face), and from then on the shader is still evaluating a
  * closed form, still writing nothing per frame.
  *
  * <p>The sweep must agree with what the GPU draws, so it walks the arc through {@link ParticleMotion}, which
@@ -39,7 +39,7 @@ public final class ParticleCollision {
     /**
      * How far a chord may cut the corner of the arc it stands in for, in blocks.
      *
-     * <p>This is not about tunnelling — a probe walks the voxel grid along its whole segment, so a long
+     * <p>This is not about tunnelling: a probe walks the voxel grid along its whole segment, so a long
      * chord still finds the first block on it. It is only about the curve: what a chord misses is the
      * sagitta, and a tenth of a block of it is not a contact anyone can see in the wrong place.
      */
@@ -49,7 +49,7 @@ public final class ParticleCollision {
      * A safety net on the number of chords one sweep may cut, not a budget it is expected to spend.
      *
      * <p>It used to be a budget: the step was sized once from the speed at birth and then stretched to fit
-     * whatever was left, which quietly broke the one thing a chord has to be — short enough that crossing it
+     * whatever was left, which quietly broke the one thing a chord has to be: short enough that crossing it
      * at a constant speed is a fair description of the arc. A particle that lives a minute got chords tens of
      * blocks long, the hit fraction along one mapped to a small fraction of the age it should have, and the
      * particle froze in mid-air above the floor it had been told it reached. Steps are sized from the
@@ -117,7 +117,7 @@ public final class ParticleCollision {
      * Splits {@code velocity} about an axis-aligned face and puts it back together as the rebound: the part
      * into the surface comes back scaled by {@code restitution}, the part along it survives {@code friction}.
      *
-     * <p>A velocity already leaving the surface is only slowed, never flipped — reflecting it would drive
+     * <p>A velocity already leaving the surface is only slowed, never flipped: reflecting it would drive
      * the particle back into the block it just left.
      */
     public static Vector3f reflect(Vector3f velocity, int normal, float restitution, float friction,
@@ -180,6 +180,12 @@ public final class ParticleCollision {
         return ParticleMotion.velocity(style, rebound, settled, target);
     }
 
+    /** {@link #velocityAt} until {@code restAge}, zero after: {@code gemrender_particleMotion}. Streak input. */
+    public static Vector3f motionAt(ParticleStyle style, Vector3f spawnVelocity, Contact contact, float age,
+                                    Vector3f target) {
+        return age >= contact.restAge() ? target.zero() : velocityAt(style, spawnVelocity, contact, age, target);
+    }
+
     private static float sweep(Probe probe, ParticleStyle style, double originX, double originY, double originZ,
                                Vector3f velocity, float duration, float radius, Hit hit) {
         if (duration <= 0.0f) {
@@ -221,8 +227,8 @@ public final class ParticleCollision {
      * How long the arc stays straight enough, from {@code age}, for one chord to stand in for it.
      *
      * <p>Driven by how hard the path is bending <em>at that moment</em> rather than by how far it goes or by
-     * how fast it set off. What bends a particle is whatever acceleration the closed form is applying — the
-     * pull, less what drag is already taking back — and the sagitta a chord misses over one step of that is
+     * how fast it set off. What bends a particle is whatever acceleration the closed form is applying (the
+     * pull, less what drag is already taking back), and the sagitta a chord misses over one step of that is
      * about {@code bend * step^2 / 8}.
      *
      * <p>Measuring it locally is what makes this hold for a flight of any length. A particle at terminal
