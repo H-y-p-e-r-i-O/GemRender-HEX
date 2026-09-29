@@ -44,7 +44,12 @@ final class ResidentModel {
                     continue;
                 }
 
-                parts.add(new Part(ResidentMesh.upload(gltfMesh.geometry()), material));
+                parts.add(new Part(ResidentMesh.upload(gltfMesh.geometry()), material, null));
+            }
+
+            for (GemRenderGltfModel.SlotMesh slot : model.slotMeshes()) {
+                parts.add(new Part(ResidentMesh.upload(slot.mesh().geometry()), DirectMaterial.of(slot.material()),
+                        slot.slot()));
             }
 
             if (skipped > 0) {
@@ -73,6 +78,7 @@ final class ResidentModel {
         parts.clear();
     }
 
-    record Part(ResidentMesh mesh, DirectMaterial material) {
+    /** {@code slot} non-null: texture from the submit's {@link TextureSlots}, unbound => not drawn. */
+    record Part(ResidentMesh mesh, DirectMaterial material, @org.jetbrains.annotations.Nullable String slot) {
     }
 }

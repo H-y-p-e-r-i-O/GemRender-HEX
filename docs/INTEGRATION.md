@@ -1236,6 +1236,20 @@ cooldown sweep. And one thing to know if you draw with a scissor: an item's own 
 if you enable a scissor immediately after drawing GemRender items and before anything else draws, call
 `DirectRenderer.flush(DirectPass.GUI)` first.
 
+### Texture slots
+
+Material `extras.textureSlot: "<name>"` => its primitives take a texture chosen per submit (a player's skin on
+first-person arm meshes):
+
+```java
+DirectRenderer.submit(model, palette, morphs, pose, light, overlay, argb, DirectPass.HAND, VariantUv.NONE,
+        Paint.NONE, 0, null, slot -> slot.equals("player_arm") ? player.getSkin().texture() : null);
+```
+
+- Unbound (`null`) => that slot's meshes not drawn; the overloads without `TextureSlots` bind none.
+- Slot primitives: never atlased, UVs as authored, merged per (slot, material); batched per (mesh, texture).
+- Direct path only: outside the Flywheel `Model` => world visuals draw none. `GemRenderGltfModel.slots()` lists them.
+
 ### What this path does not do
 
 - **PBR is not applied.** A PBR model's sheet carries its extra bands and the vertex UVs address the

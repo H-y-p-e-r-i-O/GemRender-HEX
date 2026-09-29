@@ -14,6 +14,7 @@ import com.wf.gemrender.texture.Paint;
 import com.wf.gemrender.texture.PaintArray;
 import com.wf.gemrender.texture.VariantUv;
 import com.wf.gemrender.water.PassState;
+import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -73,6 +74,12 @@ public final class DirectRenderer {
 
     public static void submit(GemRenderGltfModel model, @Nullable GltfAnimation clip, float seconds,
                               Matrix4f pose, int light, int overlay, int argb, DirectPass pass, VariantUv variant) {
+        submit(model, clip, seconds, pose, light, overlay, argb, pass, variant, TextureSlots.NONE);
+    }
+
+    public static void submit(GemRenderGltfModel model, @Nullable GltfAnimation clip, float seconds,
+                              Matrix4f pose, int light, int overlay, int argb, DirectPass pass, VariantUv variant,
+                              TextureSlots slots) {
         RenderSystem.assertOnRenderThread();
 
         if (!DirectProgram.getInstance()
@@ -93,10 +100,7 @@ public final class DirectRenderer {
         PassQueue queue = QUEUES.computeIfAbsent(queued, key -> new PassQueue());
         PaletteSlot slot = stagePalette(queue, model, clip, seconds, queued);
 
-        for (ResidentModel.Part part : resident.parts()) {
-            Batch batch = queue.batch(part);
-            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant);
-        }
+        enqueue(queue, resident, pose, slot, light, overlay, argb, variant, Paint.NONE, 0, 0, slots);
 
         DirectStats.submitEnd(queued);
     }
@@ -107,11 +111,16 @@ public final class DirectRenderer {
      */
     public static void submit(GemRenderGltfModel model, AnimationBlend blend, Matrix4f pose, int light,
                               int overlay, int argb, DirectPass pass, VariantUv variant) {
+        submit(model, blend, pose, light, overlay, argb, pass, variant, TextureSlots.NONE);
+    }
+
+    public static void submit(GemRenderGltfModel model, AnimationBlend blend, Matrix4f pose, int light,
+                              int overlay, int argb, DirectPass pass, VariantUv variant, TextureSlots slots) {
         BLEND_PROBE.set(model, 0, blend, QUANTUM_SECONDS, PoseCache.weightSteps(0));
         if (BLEND_PROBE.isSingleClip() || BLEND_PROBE.isRest()) {
             GltfAnimation clip = BLEND_PROBE.isRest() ? null : BLEND_PROBE.clip(0);
             submit(model, clip, clip == null ? 0.0f : BLEND_PROBE.time(0), pose, light, overlay, argb, pass,
-                    variant);
+                    variant, slots);
             return;
         }
         RenderSystem.assertOnRenderThread();
@@ -150,10 +159,7 @@ public final class DirectRenderer {
             }
         }
 
-        for (ResidentModel.Part part : resident.parts()) {
-            Batch batch = queue.batch(part);
-            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant);
-        }
+        enqueue(queue, resident, pose, slot, light, overlay, argb, variant, Paint.NONE, 0, 0, slots);
 
         DirectStats.submitEnd(queued);
     }
@@ -192,10 +198,7 @@ public final class DirectRenderer {
         PaletteSlot slot = stage(model, palette, morphBlock);
         DirectStats.palette(queued, false);
 
-        for (ResidentModel.Part part : resident.parts()) {
-            Batch batch = queue.batch(part);
-            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant);
-        }
+        enqueue(queue, resident, pose, slot, light, overlay, argb, variant, Paint.NONE, 0, 0, TextureSlots.NONE);
 
         DirectStats.submitEnd(queued);
     }
@@ -208,6 +211,14 @@ public final class DirectRenderer {
     public static void submit(GemRenderGltfModel model, Matrix4f[] palette, @Nullable float[] morphBlock,
                               Matrix4f pose, int light, int overlay, int argb, DirectPass pass, VariantUv variant,
                               Paint paint, int reference, Matrix4f[] restPalette) {
+        submit(model, palette, morphBlock, pose, light, overlay, argb, pass, variant, paint, reference, restPalette,
+                TextureSlots.NONE);
+    }
+
+    /** As above; {@code slots} binds the model's texture slots (unbound => those meshes not drawn). */
+    public static void submit(GemRenderGltfModel model, Matrix4f[] palette, @Nullable float[] morphBlock,
+                              Matrix4f pose, int light, int overlay, int argb, DirectPass pass, VariantUv variant,
+                              Paint paint, int reference, Matrix4f[] restPalette, TextureSlots slots) {
         RenderSystem.assertOnRenderThread();
 
         if (!DirectProgram.getInstance()
@@ -231,12 +242,27 @@ public final class DirectRenderer {
                 .addSharedPalette(restPalette, model.jointCount());
         DirectStats.palette(queued, false);
 
-        for (ResidentModel.Part part : resident.parts()) {
-            Batch batch = queue.batch(part);
-            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant, paint, reference, restBase);
-        }
+        enqueue(queue, resident, pose, slot, light, overlay, argb, variant, paint, reference, restBase, slots);
 
         DirectStats.submitEnd(queued);
+    }
+
+    private static void enqueue(PassQueue queue, ResidentModel resident, Matrix4f pose, PaletteSlot slot, int light,
+                                int overlay, int argb, VariantUv variant, Paint paint, int reference, int restBase,
+                                TextureSlots slots) {
+        for (ResidentModel.Part part : resident.parts()) {
+            Batch batch;
+            if (part.slot() == null) {
+                batch = queue.batch(part);
+            } else {
+                ResourceLocation texture = slots.texture(part.slot());
+                if (texture == null) {
+                    continue;
+                }
+                batch = queue.batch(part, texture);
+            }
+            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant, paint, reference, restBase);
+        }
     }
 
     private static PaletteSlot stage(GemRenderGltfModel model, Matrix4f[] palette,
@@ -273,11 +299,6 @@ public final class DirectRenderer {
         PaletteSlot slot = stage(model, palette, morphBlock);
         queue.palettes.put(key, slot);
         return slot;
-    }
-
-    private static void write(Batch batch, int offset, Matrix4f pose, PaletteSlot slot, int light,
-                              int overlay, int argb, VariantUv variant) {
-        write(batch, offset, pose, slot, light, overlay, argb, variant, Paint.NONE, 0, 0);
     }
 
     private static void write(Batch batch, int offset, Matrix4f pose, PaletteSlot slot, int light,
@@ -465,7 +486,7 @@ public final class DirectRenderer {
             }
 
             program.alphaCutoff(material.alphaCutoff());
-            DirectVanilla.bindTexture(UNIT_ATLAS, material.texture());
+            DirectVanilla.bindTexture(UNIT_ATLAS, batch.texture != null ? batch.texture : material.texture());
 
             batch.instances.position(0)
                     .limit(batch.count * ResidentMesh.INSTANCE_STRIDE);
@@ -485,6 +506,7 @@ public final class DirectRenderer {
             }
             queue.order.clear();
             queue.batches.clear();
+            queue.slotBatches.clear();
             queue.palettes.clear();
             queue.blendPalettes.clear();
         }
@@ -505,12 +527,15 @@ public final class DirectRenderer {
 
     private static final class Batch {
         private final ResidentModel.Part part;
+        @Nullable
+        private final ResourceLocation texture;
 
         private ByteBuffer instances;
         private int count;
 
-        Batch(ResidentModel.Part part) {
+        Batch(ResidentModel.Part part, @Nullable ResourceLocation texture) {
             this.part = part;
+            this.texture = texture;
             this.instances = MemoryUtil.memAlloc(16 * ResidentMesh.INSTANCE_STRIDE);
         }
 
@@ -538,6 +563,8 @@ public final class DirectRenderer {
 
     private static final class PassQueue {
         private final Map<ResidentModel.Part, Batch> batches = new IdentityHashMap<>();
+        private final Map<SlotKey, Batch> slotBatches = new HashMap<>();
+        private final SlotKey probe = new SlotKey();
         private final List<Batch> order = new ArrayList<>();
 
         private final Map<PaletteKey, PaletteSlot> palettes = new HashMap<>();
@@ -547,8 +574,18 @@ public final class DirectRenderer {
         Batch batch(ResidentModel.Part part) {
             Batch batch = batches.get(part);
             if (batch == null) {
-                batch = new Batch(part);
+                batch = new Batch(part, null);
                 batches.put(part, batch);
+                order.add(batch);
+            }
+            return batch;
+        }
+
+        Batch batch(ResidentModel.Part part, ResourceLocation texture) {
+            Batch batch = slotBatches.get(probe.set(part, texture));
+            if (batch == null) {
+                batch = new Batch(part, texture);
+                slotBatches.put(new SlotKey().set(part, texture), batch);
                 order.add(batch);
             }
             return batch;
@@ -586,5 +623,27 @@ public final class DirectRenderer {
     }
 
     private record PaletteSlot(int boneBase, int morphBase) {
+    }
+
+    /** Mutable for an allocation-free lookup ({@code PassQueue.probe}); stored keys never change. */
+    private static final class SlotKey {
+        private ResidentModel.Part part;
+        private ResourceLocation texture;
+
+        SlotKey set(ResidentModel.Part part, ResourceLocation texture) {
+            this.part = part;
+            this.texture = texture;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof SlotKey key && key.part == part && key.texture.equals(texture);
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(part) * 31 + texture.hashCode();
+        }
     }
 }

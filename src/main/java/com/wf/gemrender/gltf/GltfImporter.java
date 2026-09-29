@@ -91,12 +91,13 @@ public final class GltfImporter {
         GltfMorphLayout.Builder morphs = GltfMorphLayout.builder();
 
         Map<GltfMaterial, List<MeshGeometry>> byMaterial = new LinkedHashMap<>();
+        Map<Map.Entry<String, GltfMaterial>, List<MeshGeometry>> bySlot = new LinkedHashMap<>();
         int maxInfluences = 0;
         java.util.Set<ResourceLocation> masks = new java.util.LinkedHashSet<>();
         boolean allPbr = true;
 
         for (Primitive primitive : primitives) {
-            boolean atlased = atlas != null && atlas.contains(primitive.maps());
+            boolean atlased = primitive.slot() == null && atlas != null && atlas.contains(primitive.maps());
 
             int morphSet = primitive.targets() == null ? 0
                     : morphs.add(layout.nodeTable(), primitive.node(), primitive.mesh(), primitive.targets(),
@@ -111,6 +112,12 @@ public final class GltfImporter {
 
             bounds.add(geometry.positions(), geometry.vertexCount(), primitive.skinning(),
                     morphExtent(primitive.targets(), geometry.vertexCount()));
+
+            if (primitive.slot() != null) {
+                bySlot.computeIfAbsent(Map.entry(primitive.slot(), primitive.material()), key -> new ArrayList<>())
+                        .add(geometry);
+                continue;
+            }
 
             ResourceLocation texture = atlased ? atlas.texture()
                     : primitive.texture() == null ? UNTEXTURED
@@ -167,6 +174,16 @@ public final class GltfImporter {
         int colourMeshes = meshes.size();
         meshes.addAll(depthPass);
 
+        List<GemRenderGltfModel.SlotMesh> slotMeshes = new ArrayList<>();
+        for (Map.Entry<Map.Entry<String, GltfMaterial>, List<MeshGeometry>> group : bySlot.entrySet()) {
+            GltfMesh mesh = new GltfMesh(MeshGeometry.concat(group.getValue(), (part, vertexBase) -> {
+                if (part.vertexCount() > 0 && part.morphSet(0) != 0) {
+                    morphs.rebase(part.morphSet(0), vertexBase);
+                }
+            }));
+            slotMeshes.add(new GemRenderGltfModel.SlotMesh(group.getKey().getKey(), group.getKey().getValue(), mesh));
+        }
+
         Map<String, GltfAnimation> animations = new LinkedHashMap<>();
         for (AnimationModel animationModel : gltf.getAnimationModels()) {
             List<ChannelBinding> bindings = GltfAnimationCreator.createGltfAnimation(animationModel);
@@ -186,7 +203,7 @@ public final class GltfImporter {
         GemRenderGltfModel converted = new GemRenderGltfModel(new SimpleModel(meshes), layout, bounds.build(),
                 morphLayout, animations, atlas == null ? null : atlas.texture(), ownedTextures,
                 atlas == null ? java.util.List.of(com.wf.gemrender.texture.VariantUv.NONE)
-                        : atlas.variants(), masks.isEmpty() || !allPbr ? -1 : paintReference(masks));
+                        : atlas.variants(), masks.isEmpty() || !allPbr ? -1 : paintReference(masks), slotMeshes);
         if (!masks.isEmpty() && !allPbr) {
             GemRender.LOGGER.warn("{} has a paint mask but a mesh outside the banded sheet; not paintable", source);
         }
@@ -198,11 +215,13 @@ public final class GltfImporter {
                 layout.skins().size(), primitives.size(), maxInfluences, animations.size(),
                 animations.keySet());
 
-        GemRender.LOGGER.info("  draws: {} primitives -> {} materials -> {} meshes ({} draws per batch{}){}",
+        GemRender.LOGGER.info("  draws: {} primitives -> {} materials -> {} meshes ({} draws per batch{}){}{}",
                 primitives.size(), byMaterial.size(), colourMeshes, meshes.size(),
                 depthPass.isEmpty() ? "" : ", " + depthPass.size() + " of them depth-only",
                 atlas == null ? ", not atlased"
-                        : ", atlas " + atlas.texture() + " " + atlas.width() + "x" + atlas.height());
+                        : ", atlas " + atlas.texture() + " " + atlas.width() + "x" + atlas.height(),
+                slotMeshes.isEmpty() ? "" : ", texture slots " + bySlot.keySet().stream()
+                        .map(Map.Entry::getKey).toList());
 
         for (Map.Entry<GltfMaterial, List<MeshGeometry>> group : byMaterial.entrySet()) {
             GltfMaterial key = group.getKey();
@@ -320,7 +339,7 @@ public final class GltfImporter {
                 MaterialMaps maps = maps(primitive.getMaterialModel());
                 out.add(new Primitive(node, mesh, primitive, skinning(node, primitive, layout),
                         material(primitive.getMaterialModel(), maps), maps, uvInUnitSquare(primitive),
-                        MorphTargets.of(primitive, vertexCount)));
+                        MorphTargets.of(primitive, vertexCount), slot(primitive.getMaterialModel())));
             }
         }
 
@@ -342,8 +361,8 @@ public final class GltfImporter {
 
         Map<MaterialMaps, Boolean> eligible = new LinkedHashMap<>();
         for (Primitive primitive : primitives) {
-            if (primitive.texture() != null || primitive.maps()
-                    .pbr()) {
+            if (primitive.slot() == null && (primitive.texture() != null || primitive.maps()
+                    .pbr())) {
                 eligible.merge(primitive.maps(), primitive.uvInUnitSquare(), Boolean::logicalAnd);
             }
         }
@@ -497,9 +516,24 @@ public final class GltfImporter {
         return GltfResourceHook.resourceLocationFromString(element.getAsString());
     }
 
+    /** Material {@code extras.textureSlot}: texture bound per submit, see {@link GemRenderGltfModel#slotMeshes}. */
+    public static final String TEXTURE_SLOT = "textureSlot";
+
+    @org.jetbrains.annotations.Nullable
+    private static String slot(MaterialModel materialModel) {
+        Object extras = materialModel == null ? null : materialModel.getExtras();
+        if (extras == null) {
+            return null;
+        }
+        JsonElement element = GSON.toJsonTree(extras)
+                .getAsJsonObject()
+                .get(TEXTURE_SLOT);
+        return element == null ? null : element.getAsString();
+    }
+
     private record Primitive(NodeModel node, MeshModel mesh, MeshPrimitiveModel primitive,
                              VertexSkinning skinning, GltfMaterial material, MaterialMaps maps, boolean uvInUnitSquare,
-                             MorphTargets targets) {
+                             MorphTargets targets, @org.jetbrains.annotations.Nullable String slot) {
         @org.jetbrains.annotations.Nullable
         ResourceLocation texture() {
             return maps.baseColor();

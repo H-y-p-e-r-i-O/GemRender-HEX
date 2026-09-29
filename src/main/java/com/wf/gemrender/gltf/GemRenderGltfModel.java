@@ -19,21 +19,36 @@ import java.util.Map;
  * the masks' rgb), or -1 = not paintable: no mask, or a mesh outside the PBR material, the only one that
  * reads {@link com.wf.gemrender.render.GemRenderInstance#paint}. Painting a non-paintable model draws
  * garbage.
+ *
+ * <p>{@code slotMeshes}: primitives whose material names a texture slot ({@code extras.textureSlot}); outside
+ * {@link #model} (world path draws none), direct path only, texture bound per submit
+ * ({@link com.wf.gemrender.direct.TextureSlots}).
  */
 public record GemRenderGltfModel(Model model, GltfPaletteLayout layout, SkinnedBounds bounds,
                                  GltfMorphLayout morphs, Map<String, GltfAnimation> animations,
                                  @Nullable ResourceLocation atlas,
-                                 List<ResourceLocation> textures, List<VariantUv> variants, int paintReference) {
+                                 List<ResourceLocation> textures, List<VariantUv> variants, int paintReference,
+                                 List<SlotMesh> slotMeshes) {
     public GemRenderGltfModel {
         textures = List.copyOf(textures);
         variants = variants.isEmpty() ? List.of(VariantUv.NONE) : List.copyOf(variants);
+        slotMeshes = List.copyOf(slotMeshes);
     }
 
     public GemRenderGltfModel(Model model, GltfPaletteLayout layout, SkinnedBounds bounds,
                               GltfMorphLayout morphs, Map<String, GltfAnimation> animations,
                               @Nullable ResourceLocation atlas,
                               List<ResourceLocation> textures, List<VariantUv> variants) {
-        this(model, layout, bounds, morphs, animations, atlas, textures, variants, -1);
+        this(model, layout, bounds, morphs, animations, atlas, textures, variants, -1, List.of());
+    }
+
+    /** One slot's primitives under one material, merged. */
+    public record SlotMesh(String slot, GltfMaterial material, GltfMesh mesh) {
+    }
+
+    /** Distinct slot names, in mesh order. */
+    public List<String> slots() {
+        return slotMeshes.stream().map(SlotMesh::slot).distinct().toList();
     }
 
     public boolean paintable() {

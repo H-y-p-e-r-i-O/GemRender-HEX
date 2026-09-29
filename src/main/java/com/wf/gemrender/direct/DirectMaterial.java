@@ -42,6 +42,17 @@ public record DirectMaterial(ResourceLocation texture, Mode mode, float alphaCut
         return new DirectMaterial(texture, mode, cutoff, !material.backfaceCulling());
     }
 
+    /** Texture-slot material: texture bound per batch. */
+    public static DirectMaterial of(com.wf.gemrender.gltf.GltfMaterial material) {
+        Mode mode = switch (material.alphaMode()) {
+            case OPAQUE -> Mode.OPAQUE;
+            case MASK -> Mode.MASK;
+            case BLEND -> Mode.BLEND;
+        };
+        return new DirectMaterial(WHITE, mode, mode == Mode.MASK ? Math.max(material.alphaCutoff(), 0.0001f) : 0.0f,
+                material.doubleSided());
+    }
+
     private static float cutoffOf(Material material) {
         if (material.cutout() == CutoutShaders.HALF) {
             return 0.5f;
