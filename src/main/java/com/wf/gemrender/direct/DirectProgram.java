@@ -31,6 +31,7 @@ final class DirectProgram {
     private int light0Loc;
     private int light1Loc;
     private int alphaCutoffLoc;
+    private int blendedLoc;
 
     private boolean created;
     private boolean failed;
@@ -108,6 +109,7 @@ final class DirectProgram {
             light0Loc = glGetUniformLocation(program, "_gr_light0");
             light1Loc = glGetUniformLocation(program, "_gr_light1");
             alphaCutoffLoc = glGetUniformLocation(program, "_gr_alphaCutoff");
+            blendedLoc = glGetUniformLocation(program, "_gr_blended");
 
             GlStateManager._glUseProgram(program);
             glUniform1i(glGetUniformLocation(program, "_gr_atlas"), DirectRenderer.UNIT_ATLAS);
@@ -153,6 +155,10 @@ final class DirectProgram {
 
     void alphaCutoff(float cutoff) {
         glUniform1f(alphaCutoffLoc, cutoff);
+    }
+
+    void blended(boolean blended) {
+        glUniform1i(blendedLoc, blended ? 1 : 0);
     }
 
     void delete() {

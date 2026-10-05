@@ -8,7 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
-import static org.lwjgl.opengl.GL33C.GL_TEXTURE0;
+import static org.lwjgl.opengl.GL33C.*;
 
 //? if <26.1 {
 import com.wf.gemrender.mixin.direct.RenderSystemAccessor;
@@ -145,6 +145,9 @@ public final class DirectVanilla {
                 .teardownOverlayColor();
         renderer.lightTexture()
                 .turnOffLightLayer();
+        glBindSampler(atlasUnit, 0);
+        glBindSampler(overlayUnit, 0);
+        glBindSampler(lightUnit, 0);
         //?}
     }
 
@@ -170,5 +173,8 @@ public final class DirectVanilla {
     static void bindId(int unit, int id) {
         GlStateManager._activeTexture(GL_TEXTURE0 + unit);
         GlStateManager._bindTexture(id);
+        glActiveTexture(GL_TEXTURE0 + unit);
+        glBindTexture(GL_TEXTURE_2D, id);
+        glBindSampler(unit, 0);
     }
 }

@@ -71,21 +71,29 @@ public final class PassState {
         GlStateManager._glUseProgram(program);
 
         GlStateManager._blendFuncSeparate(blendSrcRgb, blendDstRgb, blendSrcAlpha, blendDstAlpha);
+        glBlendFuncSeparate(blendSrcRgb, blendDstRgb, blendSrcAlpha, blendDstAlpha);
         if (blendEquationRgb == blendEquationAlpha) {
             GlState.blendEquation(blendEquationRgb);
+            glBlendEquation(blendEquationRgb);
         }
         if (blend) {
             GlStateManager._enableBlend();
+            glEnable(GL_BLEND);
         } else {
             GlStateManager._disableBlend();
+            glDisable(GL_BLEND);
         }
 
         GlStateManager._depthFunc(depthFunc);
+        glDepthFunc(depthFunc);
         GlStateManager._depthMask(depthMask);
+        glDepthMask(depthMask);
         if (depthTest) {
             GlStateManager._enableDepthTest();
+            glEnable(GL_DEPTH_TEST);
         } else {
             GlStateManager._disableDepthTest();
+            glDisable(GL_DEPTH_TEST);
         }
 
         if (!deep) {

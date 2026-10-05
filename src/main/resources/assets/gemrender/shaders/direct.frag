@@ -6,6 +6,7 @@ uniform vec3 _gr_light0;
 uniform vec3 _gr_light1;
 
 uniform float _gr_alphaCutoff;
+uniform int _gr_blended;
 
 in vec2 _gr_texCoord;
 in vec2 _gr_lightCoord;
@@ -19,7 +20,10 @@ flat in int _gr_paintReference;
 // Coverage lives in the emissive band's alpha; paintable models are banded (3 bands).
 const float GR_EMISSIVE_BAND = 2.0 / 3.0;
 
-out vec4 _gr_fragColor;
+layout(location = 0) out vec4 _gr_fragColor;
+layout(location = 1) out vec4 _gr_fragColor1;
+layout(location = 2) out vec4 _gr_fragColor2;
+layout(location = 3) out vec4 _gr_fragColor3;
 
 void main() {
     vec4 colour = texture(_gr_atlas, _gr_texCoord) * _gr_tint;
@@ -44,5 +48,10 @@ void main() {
     vec4 overlay = texture(_gr_overlayTex, _gr_overlayCoord);
     lit = mix(overlay.rgb, lit, overlay.a);
 
-    _gr_fragColor = vec4(lit, colour.a);
+    float alpha = _gr_blended != 0 ? colour.a : 1.0;
+    vec3 transMult = _gr_blended != 0 ? mix(vec3(0.666), colour.rgb * (1.0 - pow(colour.a, 4.0)), colour.a) : vec3(0.0);
+    _gr_fragColor = vec4(lit, alpha);
+    _gr_fragColor1 = vec4(1.0 - transMult, 1.0);
+    _gr_fragColor2 = vec4(0.0, 254.0 / 255.0, _gr_lightCoord.y, 1.0);
+    _gr_fragColor3 = vec4(_gr_shadeNormal * 0.5 + 0.5, 0.0);
 }

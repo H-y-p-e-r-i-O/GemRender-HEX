@@ -416,6 +416,8 @@ public final class DirectRenderer {
 
         DirectStats.flushBegin(pass);
 
+        IrisDirectBridge.preparePass(pass);
+
         try {
             BoneBuffer.direct()
                     .uploadAndBind();
@@ -432,6 +434,13 @@ public final class DirectRenderer {
 
             GlStateManager._enableDepthTest();
             GlStateManager._depthFunc(GL_LEQUAL);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LEQUAL);
+            glColorMask(true, true, true, true);
+
+            glBindSampler(UNIT_ATLAS, 0);
+            glBindSampler(UNIT_OVERLAY, 0);
+            glBindSampler(UNIT_LIGHTMAP, 0);
 
             DirectVanilla.bindLightAndOverlay(UNIT_OVERLAY, UNIT_LIGHTMAP);
 
@@ -460,6 +469,7 @@ public final class DirectRenderer {
     }
 
     private static void drawPile(PassQueue queue, DirectProgram program, boolean blended) {
+        program.blended(blended);
         for (Batch batch : queue.order) {
             if (batch.count == 0 || batch.part.material()
                     .blended() != blended) {
@@ -474,9 +484,15 @@ public final class DirectRenderer {
                 GlStateManager._blendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,
                         GL_ONE_MINUS_SRC_ALPHA);
                 GlStateManager._depthMask(false);
+                glEnable(GL_BLEND);
+                glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,
+                        GL_ONE_MINUS_SRC_ALPHA);
+                glDepthMask(false);
             } else {
                 GlStateManager._disableBlend();
                 GlStateManager._depthMask(true);
+                glDisable(GL_BLEND);
+                glDepthMask(true);
             }
 
             if (material.doubleSided()) {

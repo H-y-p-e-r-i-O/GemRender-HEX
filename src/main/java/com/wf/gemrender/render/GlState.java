@@ -60,9 +60,7 @@ public final class GlState {
     }
 
     public static void restoreSampler(int unit, int sampler) {
-        //? if >=26.1 {
-        /*org.lwjgl.opengl.GL33C.glBindSampler(unit, sampler);
-         *///?}
+        org.lwjgl.opengl.GL33C.glBindSampler(unit, sampler);
     }
 
     public static int activeTexture() {
