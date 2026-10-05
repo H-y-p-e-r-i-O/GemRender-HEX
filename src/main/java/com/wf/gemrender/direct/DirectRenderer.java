@@ -250,6 +250,9 @@ public final class DirectRenderer {
     private static void enqueue(PassQueue queue, ResidentModel resident, Matrix4f pose, PaletteSlot slot, int light,
                                 int overlay, int argb, VariantUv variant, Paint paint, int reference, int restBase,
                                 TextureSlots slots) {
+        if (IrisDirectBridge.isRenderingShadows()) {
+            return;
+        }
         for (ResidentModel.Part part : resident.parts()) {
             Batch batch;
             if (part.slot() == null) {
@@ -343,6 +346,10 @@ public final class DirectRenderer {
 
     public static void beginLevel() {
         inLevel = true;
+        PassQueue queue = QUEUES.get(DirectPass.LEVEL);
+        if (queue != null) {
+            queue.reset();
+        }
     }
 
     public static void endLevel() {

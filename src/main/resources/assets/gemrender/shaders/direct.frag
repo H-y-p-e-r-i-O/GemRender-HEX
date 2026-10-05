@@ -39,11 +39,34 @@ void main() {
         discard;
     }
 
-    float light0 = max(0.0, dot(normalize(_gr_light0), _gr_shadeNormal));
-    float light1 = max(0.0, dot(normalize(_gr_light1), _gr_shadeNormal));
-    float diffuse = min(1.0, (light0 + light1) * 0.6 + 0.4);
+    vec3 N = length(_gr_shadeNormal) > 0.001 ? normalize(_gr_shadeNormal) : vec3(0.0, 1.0, 0.0);
+    vec3 L0 = normalize(_gr_light0);
+    vec3 L1 = normalize(_gr_light1);
 
-    vec3 lit = colour.rgb * diffuse * texture(_gr_lightmap, _gr_lightCoord).rgb;
+    // Directional lighting with enhanced contrast
+    float dot0 = max(0.0, dot(L0, N));
+    float dot1 = max(0.0, dot(L1, N));
+
+    // Hemispherical ambient: top faces receive cool sky ambient, bottom faces are in shadow
+    float hemi = mix(0.55, 1.0, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+
+    // Main diffuse term with deep shadows and readable 3D shapes
+    float diffuse = mix(0.40, 1.0, dot0 * 0.75 + dot1 * 0.25) * hemi;
+
+    vec3 lightmap = texture(_gr_lightmap, _gr_lightCoord).rgb;
+    vec3 lit = colour.rgb * diffuse * lightmap;
+
+    // Specular highlight (Blinn-Phong metallic glint)
+    // In view space, camera is looking down -Z, so view direction towards eye is +Z
+    vec3 V = vec3(0.0, 0.0, 1.0);
+    vec3 H = normalize(L0 + V);
+    float NdotH = max(0.0, dot(N, H));
+    float spec = pow(NdotH, 32.0);
+
+    // Specular only shows up where there is sky or block light, scaled nicely
+    float lightIntensity = max(_gr_lightCoord.y, _gr_lightCoord.x * 0.75);
+    vec3 specColor = vec3(1.0, 0.96, 0.90) * (spec * 0.35 * lightIntensity);
+    lit += specColor * lightmap;
 
     vec4 overlay = texture(_gr_overlayTex, _gr_overlayCoord);
     lit = mix(overlay.rgb, lit, overlay.a);
@@ -53,5 +76,5 @@ void main() {
     _gr_fragColor = vec4(lit, alpha);
     _gr_fragColor1 = vec4(1.0 - transMult, 1.0);
     _gr_fragColor2 = vec4(0.0, 254.0 / 255.0, _gr_lightCoord.y, 1.0);
-    _gr_fragColor3 = vec4(_gr_shadeNormal * 0.5 + 0.5, 0.0);
+    _gr_fragColor3 = vec4(N * 0.5 + 0.5, 0.0);
 }

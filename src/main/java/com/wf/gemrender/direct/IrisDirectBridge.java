@@ -16,6 +16,7 @@ public final class IrisDirectBridge {
     private static Object handCutoutKey;
     private static Object entitiesCutoutKey;
     private static Method applyMethod;
+    private static Method areShadowsCurrentlyBeingRenderedMethod;
 
     private IrisDirectBridge() {
     }
@@ -53,6 +54,12 @@ public final class IrisDirectBridge {
 
             Class<?> shaderInstanceClass = Class.forName("net.minecraft.client.renderer.ShaderInstance");
             applyMethod = shaderInstanceClass.getMethod("apply");
+
+            try {
+                Class<?> shadowStateClass = Class.forName("net.irisshaders.iris.shadows.ShadowRenderingState");
+                areShadowsCurrentlyBeingRenderedMethod = shadowStateClass.getMethod("areShadowsCurrentlyBeingRendered");
+            } catch (Throwable ignored) {
+            }
 
             available = true;
         } catch (Throwable t) {
@@ -111,6 +118,18 @@ public final class IrisDirectBridge {
 
             applyMethod.invoke(shader);
         } catch (Throwable ignored) {
+        }
+    }
+
+    public static boolean isRenderingShadows() {
+        init();
+        if (!available || areShadowsCurrentlyBeingRenderedMethod == null) {
+            return false;
+        }
+        try {
+            return (boolean) areShadowsCurrentlyBeingRenderedMethod.invoke(null);
+        } catch (Throwable t) {
+            return false;
         }
     }
 }
