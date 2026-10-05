@@ -5,7 +5,10 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.Camera;
+import net.minecraft.client.multiplayer.ClientLevel;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 import static org.lwjgl.opengl.GL33C.*;
@@ -92,16 +95,60 @@ public final class DirectVanilla {
     }
 
     static Vector3f[] lightDirections() {
-        //? if >=26.1 {
-		/*return switch (entry) {
-			case ITEMS_FLAT -> FLAT;
-			case ITEMS_3D -> ITEMS_3D;
-			case ENTITY_IN_UI, PLAYER_SKIN -> ENTITY_IN_UI;
-			case LEVEL -> nether() ? LEVEL_NETHER : LEVEL;
-		};
-*///?} else {
-        return RenderSystemAccessor.gemrender$shaderLightDirections();
-        //?}
+        return lightDirections(DirectPass.GUI);
+    }
+
+    static Vector3f[] lightDirections(DirectPass pass) {
+        if (pass == DirectPass.GUI) {
+            //? if >=26.1 {
+            /*return switch (entry) {
+                case ITEMS_FLAT -> FLAT;
+                case ITEMS_3D -> ITEMS_3D;
+                case ENTITY_IN_UI, PLAYER_SKIN -> ENTITY_IN_UI;
+                case LEVEL -> nether() ? LEVEL_NETHER : LEVEL;
+            };
+            *///?} else {
+            return RenderSystemAccessor.gemrender$shaderLightDirections();
+            //?}
+        }
+
+        Minecraft mc = Minecraft.getInstance();
+        ClientLevel level = mc.level;
+        if (level == null || !level.dimensionType().hasSkyLight()) {
+            return RenderSystemAccessor.gemrender$shaderLightDirections();
+        }
+
+        Camera camera = mc.gameRenderer != null ? mc.gameRenderer.getMainCamera() : null;
+        if (camera == null || !camera.isInitialized()) {
+            return RenderSystemAccessor.gemrender$shaderLightDirections();
+        }
+
+        float partialTick = com.wf.gemrender.render.Vanilla.partialTick();
+        float celestialAngle = level.getTimeOfDay(partialTick);
+        float angleRad = celestialAngle * ((float) Math.PI * 2.0F);
+
+        float cos = (float) Math.cos(angleRad);
+        float sin = (float) Math.sin(angleRad);
+
+        Vector3f celestialDirWorld = new Vector3f();
+        if (cos >= 0.0F) {
+            // Daytime: Sun is above horizon
+            celestialDirWorld.set(-sin, cos, 0.0F);
+        } else {
+            // Nighttime: Moon is opposite the sun
+            celestialDirWorld.set(sin, -cos, 0.0F);
+        }
+        celestialDirWorld.normalize();
+
+        // Transform celestial direction from world space into view/camera space
+        Vector3f light0View = new Vector3f();
+        new Quaternionf(camera.rotation()).conjugate().transform(celestialDirWorld, light0View);
+        light0View.normalize();
+
+        // Fill/ambient bounce light from opposite / ground direction in view space
+        Vector3f light1View = new Vector3f(-light0View.x() * 0.4F, 0.6F, -light0View.z() * 0.4F).normalize();
+
+        return new Vector3f[] { light0View, light1View };
     }
 
     //? if >=26.1 {

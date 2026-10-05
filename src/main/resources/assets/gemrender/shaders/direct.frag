@@ -43,29 +43,35 @@ void main() {
     vec3 L0 = normalize(_gr_light0);
     vec3 L1 = normalize(_gr_light1);
 
-    // Directional lighting with enhanced contrast
+    // Direct illumination from celestial source (Sun / Moon)
     float dot0 = max(0.0, dot(L0, N));
+    // Fill illumination from secondary source / ground bounce
     float dot1 = max(0.0, dot(L1, N));
 
-    // Hemispherical ambient: top faces receive cool sky ambient, bottom faces are in shadow
+    float skyLight = clamp(_gr_lightCoord.y, 0.0, 1.0);
+    float blockLight = clamp(_gr_lightCoord.x, 0.0, 1.0);
+
+    // Hemispherical ambient (sky from above, ground bounce from below)
     float hemi = mix(0.55, 1.0, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
 
-    // Main diffuse term with deep shadows and readable 3D shapes
-    float diffuse = mix(0.40, 1.0, dot0 * 0.75 + dot1 * 0.25) * hemi;
+    // When under the sky (skyLight -> 1.0), directional sun contrast is fully active.
+    // In caves/indoors (skyLight -> 0.0), lighting smoothly becomes soft omnidirectional.
+    float directCelestial = dot0 * 0.85 + dot1 * 0.15;
+    float directionalFactor = mix(0.65, directCelestial, skyLight);
+    float diffuse = mix(0.35, 1.0, directionalFactor) * mix(0.70, hemi, skyLight);
 
     vec3 lightmap = texture(_gr_lightmap, _gr_lightCoord).rgb;
     vec3 lit = colour.rgb * diffuse * lightmap;
 
     // Specular highlight (Blinn-Phong metallic glint)
-    // In view space, camera is looking down -Z, so view direction towards eye is +Z
+    // In view space, camera eye is looking along -Z, so direction towards eye is +Z
     vec3 V = vec3(0.0, 0.0, 1.0);
     vec3 H = normalize(L0 + V);
     float NdotH = max(0.0, dot(N, H));
-    float spec = pow(NdotH, 32.0);
+    float sunSpec = pow(NdotH, 32.0) * skyLight;
+    float torchSpec = pow(max(0.0, dot(N, V)), 16.0) * blockLight * 0.20;
 
-    // Specular only shows up where there is sky or block light, scaled nicely
-    float lightIntensity = max(_gr_lightCoord.y, _gr_lightCoord.x * 0.75);
-    vec3 specColor = vec3(1.0, 0.96, 0.90) * (spec * 0.35 * lightIntensity);
+    vec3 specColor = vec3(1.0, 0.96, 0.90) * (sunSpec * 0.50 + torchSpec);
     lit += specColor * lightmap;
 
     vec4 overlay = texture(_gr_overlayTex, _gr_overlayCoord);

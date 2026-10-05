@@ -436,7 +436,7 @@ public final class DirectRenderer {
             program.matrices(new Matrix4f(RenderSystem.getModelViewMatrix()),
                     new Matrix4f(DirectVanilla.projection()));
 
-            Vector3f[] lights = DirectVanilla.lightDirections();
+            Vector3f[] lights = DirectVanilla.lightDirections(pass);
             program.lightDirections(lights[0], lights[1]);
 
             GlStateManager._enableDepthTest();

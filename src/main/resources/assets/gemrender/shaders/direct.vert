@@ -39,7 +39,7 @@ void main() {
     vec4 posed = _gr_pose * (skin * vec4(position, 1.0));
     gl_Position = _gr_projection * _gr_modelView * posed;
 
-    _gr_shadeNormal = normalize(mat3(_gr_pose) * (mat3(skin) * normal));
+    _gr_shadeNormal = normalize(mat3(_gr_modelView) * (mat3(_gr_pose) * (mat3(skin) * normal)));
 
     _gr_texCoord = _gr_uv + _gr_overlayUv.zw;
     _gr_lightCoord = _gr_light;
