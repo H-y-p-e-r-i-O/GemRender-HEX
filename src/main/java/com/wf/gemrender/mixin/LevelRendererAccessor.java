@@ -22,6 +22,11 @@ public interface LevelRendererAccessor {
 			double camX, double camY, double camZ, Matrix4f projectionMatrix);
 *///?}
 
+    //? if >=1.21 <26.1 {
+    @Accessor("visibleSections")
+    it.unimi.dsi.fastutil.objects.ObjectArrayList<net.minecraft.client.renderer.chunk.SectionRenderDispatcher.RenderSection> gemrender$visibleSections();
+    //?}
+
     @Accessor("ticks")
     int gemrender$getTicks();
 }

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 import static org.lwjgl.opengl.GL30C.GL_RGBA32F;
 import static org.lwjgl.opengl.GL31C.GL_TEXTURE_BUFFER;
@@ -60,6 +61,14 @@ public final class ParticleBuffer {
 
     private long uploadBytes;
 
+    private BooleanSupplier hidden = () -> false;
+
+    private int hiddenBufferId;
+
+    private int hiddenTextureId;
+
+    private int hiddenFloats;
+
     private ParticleBuffer() {
     }
 
@@ -91,6 +100,22 @@ public final class ParticleBuffer {
             style.write(data, index * ParticleStyle.FLOATS);
             markDirty(index * ParticleStyle.FLOATS, ParticleStyle.FLOATS);
             return index;
+        }
+    }
+
+    /** Billboards of {@code style} fade from 0 at {@code d <= cull} to 1 at {@code cull + CULL_RAMP}. */
+    public static final float CULL_RAMP = 2.0f;
+
+    private static final int CULL_FLOAT = 22;
+
+    /** Camera-distance cull for one style, live; 0 = off. {@link com.wf.gemrender.medium.CameraMedium} sets it. */
+    public void setStyleCull(int index, float cull) {
+        synchronized (lock) {
+            int at = index * ParticleStyle.FLOATS + CULL_FLOAT;
+            if (data[at] != cull) {
+                data[at] = cull;
+                markDirty(at, 1);
+            }
         }
     }
 
@@ -301,16 +326,55 @@ public final class ParticleBuffer {
         bind();
     }
 
+    /**
+     * {@code when} true at {@link #bind} => every particle instance draws nothing (all slots read dead), e.g. a
+     * thermal sensor pass. Callers changing its answer mid-frame call {@link #bind}.
+     */
+    public void hideWhen(BooleanSupplier when) {
+        hidden = when;
+    }
+
     public void bind() {
         if (textureId == 0) {
             return;
         }
 
+        int texture = hidden.getAsBoolean() ? hiddenTexture() : textureId;
         int previousUnit = TextureUnits.activate(TEXTURE_UNIT);
         try {
-            glBindTexture(GL_TEXTURE_BUFFER, textureId);
+            glBindTexture(GL_TEXTURE_BUFFER, texture);
         } finally {
             TextureUnits.restore(previousUnit);
+        }
+    }
+
+    /** Zeros sized like {@link #data}: life 0 => dead. */
+    private int hiddenTexture() {
+        synchronized (lock) {
+            if (hiddenFloats != data.length) {
+                if (hiddenTextureId == 0) {
+                    hiddenBufferId = glGenBuffers();
+                    hiddenTextureId = glGenTextures();
+                }
+                int previousBuffer = glGetInteger(GL_ARRAY_BUFFER_BINDING);
+                FloatBuffer zeros = MemoryUtil.memCallocFloat(data.length);
+                try {
+                    glBindBuffer(GL_ARRAY_BUFFER, hiddenBufferId);
+                    glBufferData(GL_ARRAY_BUFFER, zeros, GL_STATIC_DRAW);
+                } finally {
+                    MemoryUtil.memFree(zeros);
+                    glBindBuffer(GL_ARRAY_BUFFER, previousBuffer);
+                }
+                int previousUnit = TextureUnits.activate(TEXTURE_UNIT);
+                try {
+                    glBindTexture(GL_TEXTURE_BUFFER, hiddenTextureId);
+                    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, hiddenBufferId);
+                } finally {
+                    TextureUnits.restore(previousUnit);
+                }
+                hiddenFloats = data.length;
+            }
+            return hiddenTextureId;
         }
     }
 
@@ -321,6 +385,13 @@ public final class ParticleBuffer {
                 glDeleteBuffers(bufferId);
                 textureId = 0;
                 bufferId = 0;
+            }
+            if (hiddenTextureId != 0) {
+                glDeleteTextures(hiddenTextureId);
+                glDeleteBuffers(hiddenBufferId);
+                hiddenTextureId = 0;
+                hiddenBufferId = 0;
+                hiddenFloats = 0;
             }
             if (staging != null) {
                 MemoryUtil.memFree(staging);

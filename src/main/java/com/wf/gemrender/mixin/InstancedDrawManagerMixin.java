@@ -27,8 +27,8 @@ abstract class InstancedDrawManagerMixin {
 
     @Inject(method = "submitOitDraws", at = @At("HEAD"), cancellable = true)
     private void gemrender$skipCoefficientPasses(PipelineCompiler.OitMode mode, CallbackInfo ci) {
-        if (mode != PipelineCompiler.OitMode.EVALUATE && Absorbance.getInstance()
-                .exclusive()) {
+        if (Absorbance.getInstance()
+                .skips(mode)) {
             ci.cancel();
         }
     }

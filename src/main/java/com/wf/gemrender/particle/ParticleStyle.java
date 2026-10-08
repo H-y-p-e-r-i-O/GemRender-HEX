@@ -26,6 +26,7 @@ public final class ParticleStyle {
     public final ContactResponse response;
     public final float fadeOut;
     public final float streak;
+    public final float glow;
 
     private final float[] data;
 
@@ -53,6 +54,7 @@ public final class ParticleStyle {
         response = responses[Math.max(0, Math.min(responses.length - 1, (int) data[18]))];
         fadeOut = data[19];
         streak = data[20];
+        glow = data[21];
     }
 
     /** Whether a spawn through this style is worth sweeping for a contact at all. */
@@ -109,6 +111,7 @@ public final class ParticleStyle {
         private float friction = 0.0f;
         private float fadeOut = 0.0f;
         private float streak = 0.0f;
+        private float glow = 0.0f;
 
         private Builder() {
         }
@@ -149,6 +152,18 @@ public final class ParticleStyle {
          */
         public Builder streak(float seconds) {
             streak = seconds;
+            return this;
+        }
+
+        /**
+         * Share of alpha drawn as emission while hot (fading over the {@link #cool} span when one is set);
+         * the rest absorbs. Read only by {@link ParticleModels#glowing}; other materials ignore it.
+         */
+        public Builder glow(float share) {
+            if (!(share >= 0.0f && share <= 1.0f)) {
+                throw new IllegalArgumentException("glow is a share in [0, 1], got " + share);
+            }
+            glow = share;
             return this;
         }
 
@@ -236,7 +251,7 @@ public final class ParticleStyle {
                     alphaFalloff, coolFloor, coolSpan, spinRate,
                     lightBlock, lightSky, dragYSet ? dragY : drag, fadeIn,
                     restitution, friction, response.ordinal(), fadeOut,
-                    streak, 0.0f, 0.0f, 0.0f);
+                    streak, glow, 0.0f, 0.0f);
         }
     }
 }

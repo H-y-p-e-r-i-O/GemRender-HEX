@@ -88,6 +88,21 @@ public final class ParticleShapes {
         return free + (rest - free) * w * w;
     }
 
+    /** {@code gemrender_nearFade}. */
+    public static float nearFade(Vector3fc center, Vector3fc eye, float size) {
+        float d = center.distance(eye);
+        return Math.max(0.0f, Math.min(1.0f, (d - NEAR_IN * size) / Math.max((NEAR_OUT - NEAR_IN) * size, 1e-6f)));
+    }
+
+    /** {@code gemrender_cullFade}. */
+    public static float cullFade(Vector3fc center, Vector3fc eye, float cull) {
+        return cull > 0.0f ? Math.max(0.0f, Math.min(1.0f, (center.distance(eye) - cull) / ParticleBuffer.CULL_RAMP))
+                : 1.0f;
+    }
+
+    public static final float NEAR_IN = 0.5f;
+    public static final float NEAR_OUT = 1.5f;
+
     public static float bodyScale(ParticleStyle style, float unitAge) {
         return 1.0f - ParticleMotion.fade(style, unitAge);
     }

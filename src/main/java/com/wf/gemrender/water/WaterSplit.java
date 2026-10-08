@@ -102,9 +102,8 @@ public final class WaterSplit {
         }
 
         prepassTimer.begin();
-        prepass.run(stage, programs, cloudsFolded());
+        prepassValid = prepass.run(stage, programs, cloudsFolded());
         prepassTimer.end();
-        prepassValid = true;
         cloudFrame = prepass.foldedClouds();
     }
 
@@ -154,7 +153,7 @@ public final class WaterSplit {
             if (!absorbance.present() || !programs.ensureCreated()) {
                 return false;
             }
-            compositeAbsorbance(absorbance);
+            compositeAbsorbance(absorbance, oit);
             return absorbance.exclusive();
         }
         armedComposite = false;
@@ -177,11 +176,16 @@ public final class WaterSplit {
             GlStateManager._depthFunc(GL_ALWAYS);
 
             if (absorbanceFrame) {
-                programs.drawAbsorbanceBehind(absorbance.accumulateTexture(), absorbance.frontTexture());
+                programs.drawAbsorbanceBehind(absorbance);
             }
             if (waveletFrame) {
                 programs.drawBehind(oit.accumulate, frontTexture, oit.depthBounds, oit.coefficients,
                         prepass.textureId(), prepass.cloudTextureId());
+                GlStateManager._depthMask(true);
+                GlStateManager._enableDepthTest();
+                GlState.colorMask(false, false, false, false);
+                programs.drawSplitDepth(oit.depthBounds, prepass.textureId());
+                GlState.colorMask(true, true, true, true);
             }
         } finally {
             compositeState.restore();
@@ -202,7 +206,7 @@ public final class WaterSplit {
         }
         pendingFront = false;
 
-        pendingLateFront = waveletFrame && cloudFrame;
+        pendingLateFront = cloudFrame;
 
         lateTimer.begin();
         drawFrontHalf(frontState, "water:front", absorbanceFrame, waveletFrame,
@@ -217,7 +221,7 @@ public final class WaterSplit {
         pendingLateFront = false;
 
         cloudTimer.begin();
-        drawFrontHalf(cloudFrontState, "water:front-clouds", false, true, CLOUD_PHASE_CLOUDED);
+        drawFrontHalf(cloudFrontState, "water:front-clouds", absorbanceFrame, waveletFrame, CLOUD_PHASE_CLOUDED);
         cloudTimer.end();
     }
 
@@ -241,8 +245,7 @@ public final class WaterSplit {
 
             if (absorbance) {
                 GlStateManager._depthMask(false);
-                programs.drawAbsorbanceFront(Absorbance.getInstance()
-                        .frontTexture());
+                programs.drawAbsorbanceFront(Absorbance.getInstance(), prepass.cloudTextureId(), cloudPhase);
             }
             if (wavelet) {
                 GlStateManager._depthMask(true);
@@ -256,16 +259,18 @@ public final class WaterSplit {
         }
     }
 
-    private void compositeAbsorbance(Absorbance absorbance) {
+    private void compositeAbsorbance(Absorbance absorbance, OitFramebuffer oit) {
 
         GlAudit.Scope audit = GlAudit.open("absorbance:composite")
                 .changes(GlAudit.DRAW_FRAMEBUFFER, GlAudit.READ_FRAMEBUFFER);
         compositeState.save();
         try {
-            Vanilla.bindWrite(Minecraft.getInstance()
-                    .getMainRenderTarget());
+            Minecraft mc = Minecraft.getInstance();
+            boolean fabulous = Minecraft.useShaderTransparency();
+            Vanilla.bindWrite(fabulous ? mc.levelRenderer.getItemEntityTarget() : mc.getMainRenderTarget());
 
-            GlStateManager._depthMask(false);
+            GlStateManager._depthMask(fabulous);
+            GlStateManager._enableDepthTest();
             GlState.colorMask(true, true, true, true);
             GlStateManager._enableBlend();
             GlStateManager._blendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE,
@@ -273,7 +278,7 @@ public final class WaterSplit {
             GlState.blendEquation(org.lwjgl.opengl.GL14C.GL_FUNC_ADD);
             GlStateManager._depthFunc(GL_ALWAYS);
 
-            programs.drawAbsorbanceComposite(absorbance.accumulateTexture());
+            programs.drawAbsorbanceComposite(absorbance, oit.depthBounds);
         } finally {
             compositeState.restore();
             Vanilla.bindWrite(Minecraft.getInstance()

@@ -45,13 +45,19 @@ class ParticleShapesGlTest {
 
 	private static final int SAMPLER_UNIT = 3;
 
-	private static final int OUTPUTS = 30;
+	private static final int OUTPUTS = 31;
 
 	private static final Vector3f EYE = new Vector3f(-4.0f, 7.0f, 9.0f);
 
 	private static final Vector3f RIGHT = new Vector3f(1.0f, 0.0f, 0.0f);
 
 	private static final float SIZE = 0.3f;
+
+	/** Ramp 4.5..13.5 blocks: the fixtures' 9..13 from {@link #EYE} cross it. */
+	private static final float NEAR_SIZE = 9.0f;
+
+	/** Ramp CULL..CULL + 2: crossed by the fixtures as for {@link #NEAR_SIZE}. */
+	private static final float CULL = 10.0f;
 
 	private static String harness() {
 		return """
@@ -66,6 +72,7 @@ class ParticleShapesGlTest {
 				layout(location = 1) uniform vec3 uEye;
 
 				"""
+				+ "const float NEAR_SIZE = " + NEAR_SIZE + ";\nconst float CULL = " + CULL + ";\n"
 				+ ShaderSources.read(PARTICLE_GLSL)
 				+ """
 
@@ -103,6 +110,9 @@ class ParticleShapesGlTest {
 						    put(24, gemrender_streakCorner(center, velocity, uEye, vec3(1.0, 0.0, 0.0), vec2(0.5, 0.5),
 						                                   0.3, s.streak));
 						    result[27] = gemrender_bodyScale(s, unitAge);
+						    result[28] = gemrender_nearFade(center, uEye, NEAR_SIZE);
+						    result[29] = gemrender_particleHeat(s, unitAge);
+						    result[30] = gemrender_cullFade(center, uEye, CULL);
 						}
 						""";
 	}
@@ -182,6 +192,7 @@ class ParticleShapesGlTest {
 				Vector3f at = new Vector3f();
 				Vector3f v = new Vector3f();
 
+				int ramping = 0;
 				for (float age = 0.0f; age < contact.life(); age += 0.05f) {
 					glUniform1f(0, age);
 					glDispatchCompute(1, 1, 1);
@@ -225,7 +236,14 @@ class ParticleShapesGlTest {
 					close(actual, 24, ParticleShapes.streakCorner(at, v, EYE, RIGHT, 0.5f, 0.5f, SIZE, style.streak,
 							new Vector3f()), 2e-3f, when + " streak head");
 					close(actual[27], ParticleShapes.bodyScale(style, unitAge), 1e-5f, when + " body scale");
+					close(actual[28], ParticleShapes.nearFade(at, EYE, NEAR_SIZE), 1e-4f, when + " near fade");
+					if (actual[28] > 0.0f && actual[28] < 1.0f) {
+						ramping++;
+					}
+					close(actual[29], ParticleMotion.heat(style, unitAge), 1e-5f, when + " heat");
+					close(actual[30], ParticleShapes.cullFade(at, EYE, CULL), 1e-4f, when + " cull fade");
 				}
+				assertThat(ramping).as(what + ": frames inside the near-fade ramp").isPositive();
 			} finally {
 				glDeleteBuffers(out);
 				glDeleteTextures(texture);
@@ -244,6 +262,7 @@ class ParticleShapesGlTest {
 				.tint(0.9f, 0.8f, 0.7f)
 				.alpha(0.9f, 1.5f)
 				.cool(0.3f, 0.5f)
+				.glow(0.7f)
 				.fadeOut(0.6f)
 				.streak(0.03f)
 				.bouncesOnContact(0.35f, 0.6f)

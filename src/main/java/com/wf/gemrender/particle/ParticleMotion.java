@@ -67,6 +67,12 @@ public final class ParticleMotion {
         return Math.max(0.0f, Math.min(1.0f, alpha * ramp));
     }
 
+    /** {@code gemrender_particleHeat}. */
+    public static float heat(ParticleStyle style, float unitAge) {
+        float hot = style.coolFloor < 1.0f ? 1.0f - Math.min(unitAge / Math.max(style.coolSpan, 1e-6f), 1.0f) : 1.0f;
+        return style.glow * hot;
+    }
+
     public static float cool(ParticleStyle style, float unitAge) {
         float span = Math.max(style.coolSpan, 1e-6f);
         return style.coolFloor + (1.0f - style.coolFloor) * (1.0f - Math.min(unitAge / span, 1.0f));

@@ -21,6 +21,14 @@ public final class TextureUnits {
 
     public static final int PAINT = Integer.getInteger("gemrender.paintunit", 19);
 
+    public static final int LIGHT_COOKIES = Integer.getInteger("gemrender.lightcookieunit", 20);
+
+    public static final int LIGHT_GRID = Integer.getInteger("gemrender.lightgridunit", 21);
+
+    public static final int LIGHT_OCCUPANCY = Integer.getInteger("gemrender.lightoccupancyunit", 22);
+
+    public static final int LIGHT_SHADOWS = Integer.getInteger("gemrender.lightshadowunit", 23);
+
     private TextureUnits() {
     }
 

@@ -150,6 +150,19 @@ public final class GemRenderModels {
         return built(id, ignored -> BedrockImporter.load(geometry, id, declared));
     }
 
+    /**
+     * {@code asset} to be worn through {@link com.wf.gemrender.direct.GemRenderArmorModel}: imported with the
+     * installed {@link com.wf.gemrender.direct.ArmorRig}'s patch (none => plain import). Id = {@code asset} path +
+     * {@code /armor}.
+     */
+    public static ModelCache.Handle<GemRenderGltfModel> armor(ResourceLocation asset) {
+        return built(asset.withPath(asset.getPath() + "/armor"), id -> {
+            com.wf.gemrender.direct.ArmorRig rig = com.wf.gemrender.direct.GemRenderArmorModel.rig();
+            return GltfImporter.load(asset, id, List.of(Map.of()), rig == null ? null
+                    : r -> rig.patch(r, com.wf.gemrender.direct.GemRenderArmorModel.DEFAULT_BONES));
+        });
+    }
+
     private static GemRenderGltfModel runBuilder(ResourceLocation id) throws Exception {
         Builder builder = BUILDERS.get(id);
         if (builder == null) {

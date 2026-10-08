@@ -290,6 +290,46 @@ class ParticleCollisionTest {
 	}
 
 	@Test
+	@DisplayName("a mesh particle drifting into a wall stops its side there, not its centre")
+	void radiusKeepsTheSideOutOfAWall() {
+		ParticleStyle style = stopping();
+		Vector3f spawn = new Vector3f(0.0f, 10.0f, 0.0f);
+		Vector3f velocity = new Vector3f(2.0f, 0.0f, 0.0f);
+
+		// Centre alone lands at x = 2 (1 s fall), never reaching the wall at 2.5; its side would be inside.
+		ParticleCollision.Contact contact = ParticleCollision.predict(roomWithAWall(2.5, 0.0), style,
+				spawn.x, spawn.y, spawn.z, velocity.x, velocity.y, velocity.z, 10.0f, 1.0f);
+
+		assertThat(contact.normal()).isEqualTo(ParticleCollision.MINUS_X);
+		ParticleCollision.positionAt(style, spawn, velocity, contact, contact.restAge(), scratch);
+		assertThat(scratch.x).isCloseTo(1.5f, within(0.01f));
+		assertThat(scratch.y).isCloseTo(1.0f, within(0.2f));
+	}
+
+	@Test
+	@DisplayName("a mesh particle spawned against a wall still flies")
+	void radiusOffsetInsideAWallAtSpawnIsIgnored() {
+		ParticleStyle style = stopping();
+
+		ParticleCollision.Probe solid = (fx, fy, fz, tx, ty, tz, into) -> {
+			if (fx < 0.5 && tx < 0.5) {
+				return false;
+			}
+			into.fraction = fx >= 0.5 ? 0.0f : (float) ((0.5 - fx) / (tx - fx));
+			into.normal = ParticleCollision.MINUS_X;
+			return true;
+		};
+		ParticleCollision.Probe floor = floorAt(0.0);
+		ParticleCollision.Contact contact = ParticleCollision.predict(
+				(fx, fy, fz, tx, ty, tz, into) -> solid.probe(fx, fy, fz, tx, ty, tz, into)
+						|| floor.probe(fx, fy, fz, tx, ty, tz, into),
+				style, 0.0, 10.0, 0.0, -10.0f, 0.0f, 0.0f, 10.0f, 1.0f);
+
+		assertThat(contact.normal()).isEqualTo(ParticleCollision.PLUS_Y);
+		assertThat(contact.contactAge()).isGreaterThan(0.5f);
+	}
+
+	@Test
 	@DisplayName("a particle that lands on a floor settles on it the moment it arrives")
 	void stoppingOnAFloorSettlesThere() {
 		ParticleStyle style = stopping();

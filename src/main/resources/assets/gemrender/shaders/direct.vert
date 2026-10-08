@@ -26,6 +26,9 @@ out vec2 _gr_overlayCoord;
 out vec3 _gr_paintCoord;
 flat out int _gr_paintLayer;
 flat out int _gr_paintReference;
+#ifdef GEMRENDER_LIGHTS
+out vec3 _gr_lightPos;
+#endif
 
 void main() {
     vec3 position = _gr_position;
@@ -38,6 +41,9 @@ void main() {
 
     vec4 posed = _gr_pose * (skin * vec4(position, 1.0));
     gl_Position = _gr_projection * _gr_modelView * posed;
+#ifdef GEMRENDER_LIGHTS
+    _gr_lightPos = posed.xyz;
+#endif
 
     _gr_shadeNormal = normalize(mat3(_gr_pose) * (mat3(skin) * normal));
 

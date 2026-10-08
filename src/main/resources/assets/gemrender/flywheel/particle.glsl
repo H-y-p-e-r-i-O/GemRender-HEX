@@ -44,6 +44,8 @@ struct GemRenderStyle {
     float friction;
     float fadeOut;
     float streak;
+    float glow;
+    float cull;
 };
 
 GemRenderParticle gemrender_particle(uint slot) {
@@ -98,6 +100,8 @@ GemRenderStyle gemrender_style(float index) {
     s.friction = e.y;
     s.fadeOut = e.w;
     s.streak = f.x;
+    s.glow = f.y;
+    s.cull = f.z;
     // e.z is the style's ContactResponse, which only the CPU reads: what it decides is already baked into
     // the two ages and the life the particle carries.
     return s;
@@ -240,6 +244,34 @@ vec4 gemrender_particleColor(in GemRenderParticle p, in GemRenderStyle s, float 
 
     return vec4(clamp(s.tint * gemrender_particleLookColor(p) * cool * p.tintScale, 0.0, 1.0),
                 clamp(alpha * ramp, 0.0, 1.0));
+}
+
+// Emission share of alpha (ParticleStyle.glow): fades over the cool span when one is set.
+float gemrender_particleHeat(in GemRenderStyle s, float unitAge) {
+    float hot = s.coolFloor < 1.0 ? 1.0 - min(unitAge / max(s.coolSpan, 1e-6), 1.0) : 1.0;
+    return s.glow * hot;
+}
+
+// Absorbance materials read heat from overlay.x (gemrender:absorbance.glsl); heat 0 => vanilla (0, 10).
+ivec2 gemrender_particleOverlay(float heat) {
+    return ivec2(int(clamp(heat, 0.0, 1.0) * 1023.0 + 0.5), 10);
+}
+
+// Camera inside a billboard => full-screen layer. Alpha 0 at d <= NEAR_IN x size, 1 at d >= NEAR_OUT x size.
+const float GEMRENDER_NEAR_IN = 0.5;
+const float GEMRENDER_NEAR_OUT = 1.5;
+
+float gemrender_nearFade(vec3 center, vec3 eye, float size) {
+    float d = distance(center, eye);
+    return clamp((d - GEMRENDER_NEAR_IN * size) / max((GEMRENDER_NEAR_OUT - GEMRENDER_NEAR_IN) * size, 1e-6),
+                 0.0, 1.0);
+}
+
+// ParticleBuffer.setStyleCull: 0 at d <= cull, 1 at d >= cull + RAMP (= ParticleBuffer.CULL_RAMP); cull 0 = off.
+const float GEMRENDER_CULL_RAMP = 2.0;
+
+float gemrender_cullFade(vec3 center, vec3 eye, float cull) {
+    return cull > 0.0 ? clamp((distance(center, eye) - cull) / GEMRENDER_CULL_RAMP, 0.0, 1.0) : 1.0;
 }
 
 // Right-handed (t, b, n), t x b = n; rolled about n.

@@ -642,6 +642,12 @@ public final class GemRenderClient {
 
 			describeRun(asset);
 
+			//? if lights {
+			if (com.wf.gemrender.spike.LightSpike.wanted()) {
+				com.wf.gemrender.spike.LightSpike.stage(connection, origin);
+			}
+			//?}
+
 			GemRender.LOGGER.info("Auto-spike: queued {} x {} at {}",
 					autoCount(), asset != null ? asset : "skinned cubes", origin.toShortString());
 			return;
@@ -733,6 +739,12 @@ public final class GemRenderClient {
 				kindsFpsSamples++;
 			}
 		}
+
+		//? if lights {
+		if (com.wf.gemrender.spike.LightSpike.wanted()) {
+			com.wf.gemrender.spike.LightSpike.tick();
+		}
+		//?}
 
 		if (++ticksSinceSpike == AUTO_EXIT_TICKS / 2) {
 			if (kinds != null) {

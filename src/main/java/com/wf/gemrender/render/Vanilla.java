@@ -99,6 +99,27 @@ public final class Vanilla {
         //?}
     }
 
+    public static int colorTextureId(RenderTarget target) {
+        //? if >=26.1 {
+        /*return dev.engine_room.flywheel.backend.util.VanillaState.glId(target.getColorTexture());
+         *///?} else {
+        return target.getColorTextureId();
+        //?}
+    }
+
+    /** Vanilla lightmap; light layer left off. */
+    public static int lightmapTextureId() {
+        //? if >=26.1 {
+        /*return 0; // TODO 26.1: lightmap is a GpuTexture view; CameraMedium never draws there yet.
+         *///?} else {
+        var light = Minecraft.getInstance().gameRenderer.lightTexture();
+        light.turnOnLightLayer();
+        int id = com.mojang.blaze3d.systems.RenderSystem.getShaderTexture(2);
+        light.turnOffLightLayer();
+        return id;
+        //?}
+    }
+
     public static float zNear() {
         //? if >=26.1 {
         /*return net.minecraft.client.Camera.PROJECTION_Z_NEAR;

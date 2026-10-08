@@ -115,7 +115,7 @@ tooltip; `handle.getBlocking()` waits, and is for a command or a test, never for
 
 ### Hidden nodes
 
-glTF node named `hit_*` or `socket_*` (case-insensitive): subtree never drawn; still in the node table. For consumer-side data (hit volumes, attach markers) shipped inside the model.
+glTF node named `hit_*` or `socket_*` (case-insensitive), or with `extras.gemrenderHidden: true`: subtree never drawn; still in the node table. For consumer-side data (hit volumes, attach markers, colliders) shipped inside the model.
 
 ### Bedrock geometry and its texture
 
@@ -1158,6 +1158,11 @@ The glTF's node names are matched to the vanilla parts by `head`, `body`, `left_
 `left_leg`, `right_leg`. Pass a map to the constructor if your exporter called them something else. A
 name that matches nothing is ignored rather than rejected -- a helmet has no leg bone.
 
+**A wearer body with more joints** (elbows, knees, waist): its mod installs an `ArmorRig` with
+`GemRenderArmorModel.setRig`; armour assets declared through `GemRenderModels.armor(asset)` then import with the
+rig's `RigPatch` (joints added under the six part nodes, unskinned vertices weighted onto them), and `ArmorRig.pose`
+runs after the six part rotations each draw. `GemRenderModels.get` / `handle` stay unpatched. AHF ships one.
+
 ### Batching, and where it happens
 
 Nothing draws at the moment you submit. Copies join a batch and the batch is drawn when its pass
@@ -1284,9 +1289,9 @@ Same buffer, style, emitter; vertex shader differs.
 
 | type | shape | spawn with | model |
 |---|---|---|---|
-| `BILLBOARD` | camera-facing quad, rolled by `spin` | `spawn` | `additive` / `translucent` / `cutout` / `sprite` |
+| `BILLBOARD` | camera-facing quad, rolled by `spin` | `spawn` | `absorbance` / `glowing` / `additive` / `translucent` / `cutout` / `sprite` |
 | `MESH` | model, +Y along velocity, rolled about it | `spawn` | any `Model` |
-| `STREAK` | camera-facing quad along motion; head on the particle, length `max(streak * speed, width)`; settled => `width` dot | `spawn`; style `.streak(seconds)` | `additive(texture)`, v = 0 at the head |
+| `STREAK` | camera-facing quad along motion; head on the particle, length `max(streak * speed, width)`; settled => `width` dot | `spawn`; style `.streak(seconds)` | `glowing(texture)` / `additive(texture)`, v = 0 at the head |
 | `DECAL` | quad flat on a plane; never moves | `spawnDecal(x, y, z, nx, ny, nz, life, size, roll, look)` | `decal(texture)` |
 | `BODY` | model tumbling end over end; rests lying down, +Y horizontal | `spawn(probe, ...)` with a contact style | `rigid(gltfModel[, bake])` |
 
@@ -1296,6 +1301,8 @@ Same buffer, style, emitter; vertex shader differs.
   assumes a floor; a rebound ending on a wall still lies "flat".
 - `MESH` keeps the landing velocity after rest (attitude); `STREAK` reads `gemrender_particleMotion`
   (zero once settled).
+- `BILLBOARD` near fade: alpha x `gemrender_nearFade(center, eye, size)` = 0 at `d <= 0.5 size`, 1 at
+  `d >= 1.5 size`; 0 => zero-size quad. Camera inside a sprite => no full-screen layer.
 
 ### Registering a style
 
@@ -1308,6 +1315,7 @@ private static final int EXHAUST = ParticleBuffer.getInstance()
                 .tint(0xFF7A28)
                 .alpha(0.75f, 0.4f)
                 .cool(0.1f, 0.6f)
+                .glow(1.0f)
                 .build());
 ```
 
@@ -1347,7 +1355,7 @@ public final class ExhaustVisual extends AbstractVisual
         super(ctx, (Level) effect.level(), partialTick);
         this.pool = new ParticlePool(ctx, effect.emitter(),
                 GemRenderParticleTypes.BILLBOARD,
-                ParticleModels.additive(TEXTURE));
+                ParticleModels.glowing(TEXTURE));
     }
 
     @Override
@@ -1447,11 +1455,14 @@ private static final int RUBBLE = ParticleBuffer.getInstance()
 
 ```java
 emitter.spawn(level, x, y, z, vx, vy, vz, life, size);
-// Mesh: centre rests `radius` off the surface.
+// Mesh: `radius` = half extent, axis-aligned box; centre rests `radius` off the surface.
 emitter.spawn(level, x, y, z, vx, vy, vz, life, size, spinPhase, tintScale, 0.35f);
 ```
 
 - No response on the style => no sweep, level argument free.
+- `radius > 0`: centre ray + six offset rays at `±radius` per axis; earliest hit wins => a skimmed wall stops the
+  side, not the centre. Offset inside a block at spawn => dropped. Box only: rest the mesh axis-aligned (a tilted
+  cube's corners still sink).
 - Burst: hoist the probe (remembers blocks; one burst walks mostly the same ground). The level
   overload keeps one probe while the clock stands still.
 - Reads blocks: **call on the thread that owns the level** (tick, event), never a visual constructor.
@@ -1500,10 +1511,13 @@ Contract:
 - `spawnTime`, `life` as named: emitters and `aliveCount` read them.
 - Yours: `sizeScale`, `spinPhase`, `tintScale`, `look` (per particle); the style's 24 floats
   (`ParticleStyle.of(float...)`; the builder is the stock shaders' convention). WF-Ballistics reuses
-  the two cool fields as a white-out start and span.
+  the two cool fields as a white-out start and span. Float 22 = live cull (`ParticleBuffer.setStyleCull`),
+  overwritten at runtime.
 - Shape helpers: `gemrender_planeBasis`, `gemrender_decalCorner`, `gemrender_streakCorner`,
-  `gemrender_particleMotion`, `gemrender_bodyBasis`, `gemrender_particleFade`. Java mirror: `ParticleShapes`,
-  `ParticleCollision.motionAt`.
+  `gemrender_particleMotion`, `gemrender_bodyBasis`, `gemrender_particleFade`, `gemrender_nearFade`. Java
+  mirror: `ParticleShapes`, `ParticleCollision.motionAt`, `ParticleMotion.heat`.
+- `glowing` material: `flw_vertexOverlay = gemrender_particleOverlay(heat)` (heat 0..1, e.g.
+  `gemrender_particleHeat(s, unitAge)`); else `ivec2(0, 10)`.
 - `_gemrender_particles` bound on every Flywheel program; nothing to bind.
 
 ### What a closed form cannot do
@@ -1522,21 +1536,35 @@ Only frame-rate decision on this page.
 
 | `ParticleModels` | passes | depth | use |
 |---|---|---|---|
-| `additive(texture)` | 1 | none | fire, flash, tracers, sparks. Cannot darken; saturates to white when dense |
-| `cutout(texture)` | 1, early-Z | writes | dust, exhaust, bulk. Keeps darks; hard quad edges |
-| `translucent(texture)` | OIT, 3 raster passes | OIT | best look, by far most expensive |
+| `absorbance(texture)` | 1 (Fabulous 2) | none | smoke, steam, dust, foam. `tau = -ln(1 - a)` summed: exact order-independent extinction; colour = tau-weighted mean per pixel |
+| `glowing(texture)` | as `absorbance`, + RGBA16F target | none | fire, flash, sparks, exhaust. Style `.glow(share)`: share of alpha emitted while hot (fades over `cool` span); rest absorbs. Emission unlit; composited behind the pixel's absorbing media |
+| `additive(texture)` | 1 | none | glow not ordered against water; prefer `glowing` |
+| `cutout(texture)` | 1, early-Z | writes | bulk where hard edges are acceptable |
+| `translucent(texture)` | OIT, 3 raster passes | OIT | layer-ordered colour (glass-like); most expensive |
+
+- Pass count holds while no `translucent` / glTF `BLEND` draw shares the frame (`Absorbance.exclusive`);
+  a mixed frame runs all three OIT passes for everything.
+- Fabulous: depth-range pass kept; composite into the item-entity target at the nearest absorbance
+  depth, sorted against water / clouds per pixel as one layer.
+
+In game, wflib blast scenes, 1920x1080, RX 7900 XTX, Fancy:
+
+| scene | OIT `translucent` | `absorbance` / `glowing` |
+|---|---:|---:|
+| `boom large` over water, GPU us/frame (OIT chain + split) | ~1330 | ~550 |
+| same, fps | ~620 | ~1500 |
+| `boom large` on land, GPU us/frame | ~580 | ~250 |
 
 #### Only two of the three can be ordered against water
 
 Flywheel draws after entities, **before** vanilla translucent terrain.
 
 - `cutout`: correct (opaque where drawn, honest depth).
-- `translucent`: correct via `WaterSplit` (OIT stack cut at the water surface).
+- `translucent`, `absorbance`, `glowing`: correct via `WaterSplit` (stack cut at the water surface).
 - `additive`: wrong either way. Depth write => puff-shaped hole in the water; so `WriteMask.COLOR`
   => water paints over it (dimmed; bright glow over thick water vanishes).
 
-Additive only where misordering is invisible (muzzle flash, spark, at the player). Smoke trail
-`translucent`; dust plume `cutout`. Blended materials write no depth; occluding => `cutout`.
+Blended materials write no depth; occluding => `cutout`.
 
 Cutout tuning: raise the alpha test (`ParticleModels.billboard(texture, Transparency.OPAQUE,
 CutoutShaders.HALF)`), let texture alpha carve the silhouette. Low `alphaScale` + high threshold =>
@@ -1608,16 +1636,23 @@ blocks from the effect, 200 sampled ticks. `N` = target alive; spawn rate `N / l
 
 ### The water split taxes order-independent particles
 
-`WaterSplit` resubmits every `ORDER_INDEPENDENT` draw a fourth time (interleave with translucent
-terrain and clouds), water or not. `-PwaterSplit=false`: 3 000 `translucent` 655 -> 878 fps, 30 000
-98 -> 152 (34%, 56%), no water in scene.
+`WaterSplit` resubmits every `ORDER_INDEPENDENT` draw once more (interleave with translucent terrain and
+clouds).
+
+- Skipped (1.20.1: never) when no visible section has a `RenderType.translucent()` layer and no cloud is
+  folded. Translucent includes ice, stained glass, slime, honey, portals.
+- Per pixel: prepass stencil marks water / cloud in front of the scene; unmarked pixels get split depth 0
+  (fixed-function, hierarchical Z exact) => resubmitted fragments depth-rejected; behind composite
+  takes the whole stack there.
+- Remaining cost legit: smoke covering water or cloud pixels shades twice. Camera inside a gas cloud,
+  clouds in view: resubmit ~3.9 of ~11.6 ms GPU.
+- Pre-gate measurement, no water: `-PwaterSplit=false` 3 000 `translucent` 655 -> 878 fps, 30 000
+  98 -> 152.
 
 - Excluding particles from the resubmission FORBIDDEN: a particle in front of water must composite after
   it; and glTF `BLEND` materials share the path (glass row, `-PwaterColumn=8`, split on vs off: 56% of
   model pixels differ, up to 176/255).
-- Skip-when-prepass-empty: safe (no water: 0.16% pixels, <= 6/255, OIT dither) but rarely fires:
-  `WaterDepthPrepass` renders all of `RenderType.translucent()` (ice, stained glass, slime, honey,
-  portals).
+- Skipping when nothing translucent is visible: 0.16% pixels, <= 6/255 (OIT dither) vs split.
 - Avoid the tax: Fabulous (`modeActive()` false, no split) or leave `ORDER_INDEPENDENT`. `cutout`
   stays ordered against water; `additive` does not.
 
@@ -1631,6 +1666,34 @@ terrain and clouds), water or not. `-PwaterSplit=false`: 3 000 `translucent` 655
   to the pixel (measured).
 - One split point per pixel: in front of water and behind a cloud in one pixel => composited against
   the nearer.
+- Absorbance front half split by cloud coverage too (cloud pixels wait for `AFTER_WEATHER`).
+
+### Camera inside a cloud
+
+`CameraMedium.getInstance()`, per frame (else `outside()`):
+
+| call | effect |
+|---|---|
+| `inside(style, extinction, box, cull)` | billboards of `style` fade out within `cull` (ramp `ParticleBuffer.CULL_RAMP`); fog `[0, cull + ramp / 2]` |
+| `inside(volume, box)` | volume hidden; fog = noise-free mean of its march (`VolumeNoise.densityByShape` over its field, 12 samples/pixel, HG phase on `flw_light0Direction`) |
+
+- Fog: one full-screen pass at `AFTER_LEVEL` (after Fabulous composite, before hand), ending at `box` exit.
+  Colour = style tint x style light (lightmap), as the cloud draws it.
+- Billboard extinction: `ParticleOptics.extinction(style, sizeScale, livePerCubicBlock, spriteAlpha)`
+  (steady state, unit age uniform; matches a random-cloud Monte Carlo within 5%).
+- NeoForge 1.21.1 only; 1.20.1 / 26.1 / Fabric: cull applies, no fog (TODO in `CameraMediumEvents`).
+- `-Dgemrender.medium=false`: off (A/B).
+
+Camera inside wflib `gas 8`, 1920x1080, RX 7900 XTX, Fancy, GPU ms (OIT chain + split):
+
+| gas | off | on | fog pass |
+|---|---:|---:|---:|
+| raymarched volume | 7.4-10.6 + 3.7-5.3 (76-105 fps) | 1.1-3.5 + 0.5-1.7 (205-580 fps) | 0.06 |
+| billboards | 3.9 + 2.0 (~180 fps) | 1.05 + 0.53 (~650 fps) | 0.01 |
+
+- Region means fog vs no fog: billboards within 2/255; volume within 6/255 (near noise detail lost).
+- Spread on the fog side: other clusters around the camera still march.
+- Gap: overlapping volumes => only one becomes fog; the rest still march.
 
 ### Time resolution
 
@@ -1765,7 +1828,79 @@ The one number to watch is `rings x sides x 4` vertices per rope, all of which a
 the rope is 2 blocks long or 60. At the default that is 288 per rope — comparable to a small model, and
 the reason to turn the tessellation *down* for something thin and short rather than up.
 
-## 9. Things that will bite
+## 9. Lights
+
+Point and spot lights, forward-shaded: every surface shader adds `albedo x E` before fog. 1.21.1
+NeoForge only. Shadows opt-in per light.
+
+| lit | not lit |
+|---|---|
+| terrain (vanilla, Sodium 0.6/0.8), entities, block entities, items in the world, vanilla particles, Flywheel instances, direct path in the level, first-person hand (vanilla + direct `HAND`) | GUI, anything after the level (`AFTER_LEVEL` included) |
+
+### Submitting
+
+Immediate mode: a provider is polled on the render thread at the start of every level frame. Nothing
+persists between frames; interpolate with `partialTick` yourself. `Lights.shading()` false (shader pack) =>
+not polled, nothing shaded: keep a fallback (lightmap boost) for lights that matter.
+
+```java
+LightCookie beam = Lights.cookie(ResourceLocation.fromNamespaceAndPath("mymod", "textures/light/torch.png"));
+
+Lights.register((sink, partialTick) -> {
+    Vec3 eye = player.getEyePosition(partialTick);
+    Vector3f look = player.getViewVector(partialTick).toVector3f();
+    sink.spot(eye.x, eye.y, eye.z, look, new Vector3f(0, 1, 0), 32.0f, 10.0f, 30.0f, 0xFFF2E0, 300.0f, beam, true);
+    sink.point(x, y, z, 8.0f, 0xFF9040, 40.0f, false);
+});
+```
+
+| field | |
+|---|---|
+| `range` | hard edge, blocks. Irradiance `rgb * intensity * (1 - (d/range)^4)^2 / (d^2 + 1)` |
+| `intensity` | at ~1 block. `E ~ 1` (lightmap-white) at distance `d` needs `~d^2`: 300 for a 17-block beam |
+| `innerDegrees` / `outerDegrees` | half angles; smooth falloff between, squared. `outer < 89` |
+| `up` | any vector off the axis; orients the cookie |
+| `cookie` | `null` = plain cone |
+| `shadow` | occluded by full opaque blocks (`isSolidRender`); entities, slabs, glass, leaves cast none |
+
+`Lights.MAX` = 64 per frame after frustum culling; nearest kept.
+
+### Shadows
+
+- Traced per frame against a 1-bit block grid 128^3 around the camera (±64 blocks). Nothing past the grid is lit by a shadowed light.
+- Shadowed light whose source is outside the grid, or beyond the nearest 16 shadowed, is **dropped**, not shaded unshadowed: a flashlight must never show through a wall.
+- Soft edge ~1 texel (128^2 per light). Contact shadows shrink by up to half a block (bias toward the light).
+- Grid refill after teleport / chunk load: up to 0.2 ms CPU per frame, nearest sections first; light leaks through not-yet-filled sections meanwhile.
+- Muzzle flashes and other short-lived fill lights: `shadow = false`, they do not compete for the 16.
+
+### Cookies
+
+`Lights.cookie(texture)`: RGB multiplies the beam, **linear** (no sRGB decode). Centre = axis, the
+inscribed circle = the outer cone, `+v` = `up`. Resampled to 256^2; reloaded with resources; missing
+texture => magenta. Square corners outside the circle are cut by the cone. `gemrender:textures/light/flashlight.png`
+ships as a reference (LED hotspot, reflector rings, dark annulus, spill). Spot only; point lights take none.
+
+### Your own shader
+
+Splice `LightShaders.include()` after `#version` (identifiers `_grl_`-prefixed), then:
+
+```glsl
+gemrender_lightPrepare(p);                 // top of main, uniform control flow (derivatives)
+...
+color.rgb += albedo * gemrender_lights(p, gemrender_lightNormal(n));
+```
+
+`p` camera-relative world position, `n` world-oriented (zero = no facing, e.g. billboards);
+`gemrender_lightFaceNormal(p)` for a format without normals. After linking call
+`LightShaders.bindProgram(program)`. Texture units 20-23 are taken. Albedo is colour without the lightmap.
+
+### Shader packs
+
+Off while an Iris pack is in use: the pack's programs replace every patched one.
+
+---
+
+## 10. Things that will bite
 
 Failure modes that render something plausible rather than throwing.
 
@@ -1870,8 +2005,8 @@ The types a consumer actually touches.
 | `WavefrontObj` | `load(id)` reads a `.obj` as one `RigGeometry` per named group |
 | `NodeSpin`, `NodeOscillate`, `NodeSwing`, `NodeHide` | Procedural drivers: turn, rock, sweep, disappear |
 | `NodeRotation` | `compose(...)` and `offsetOf(...)`, for writing a `PoseDriver` of your own |
-| `ParticleStyle` | the curves a family of particles shares (section 6). `builder()`, `dragFromPerTickFactor`, `gravityFromPerTickDelta` |
-| `ParticleBuffer` | `registerStyle(style)` returns the index every emitter of that family passes |
+| `ParticleStyle` | the curves a family of particles shares (section 6). `builder()` (`.glow(share)` for `glowing`), `dragFromPerTickFactor`, `gravityFromPerTickDelta` |
+| `ParticleBuffer` | `registerStyle(style)` returns the index every emitter of that family passes; `hideWhen(supplier)`: true at `bind()` => all particles hidden (sensor passes) |
 | `ParticleEmitter` | `create(style, capacity, x, y, z)`, `spawn(...)`, `isIdle()`, `close()`. Held by the effect, not the visual |
 | `ParticlePool` | `new ParticlePool(ctx, emitter, type, model)` in the visual, `delete()` with it |
 | `GemRenderParticleTypes` | `BILLBOARD`, `MESH`, `STREAK`, `DECAL`, `BODY` to pass to `ParticlePool` |

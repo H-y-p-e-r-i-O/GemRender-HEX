@@ -186,6 +186,9 @@ public final class ParticleCollision {
         return age >= contact.restAge() ? target.zero() : velocityAt(style, spawnVelocity, contact, age, target);
     }
 
+    /** Extent probes: the six axis offsets of a mesh particle, {@code radius} out. */
+    private static final float[][] EXTENT = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+
     private static float sweep(Probe probe, ParticleStyle style, double originX, double originY, double originZ,
                                Vector3f velocity, float duration, float radius, Hit hit) {
         if (duration <= 0.0f) {
@@ -196,6 +199,16 @@ public final class ParticleCollision {
         Vector3f previous = new Vector3f();
         Vector3f at = new Vector3f();
         Vector3f scratch = new Vector3f();
+        Hit candidate = new Hit();
+        // Centre ray + six radius offsets: a mesh's side never enters a wall it skims. Offset inside a block at
+        // spawn => dropped (else stopped where it stands).
+        boolean[] live = new boolean[EXTENT.length];
+        if (radius > 0.0f) {
+            for (int k = 0; k < EXTENT.length; k++) {
+                live[k] = !probe.probe(originX, originY, originZ, originX + EXTENT[k][0] * radius,
+                        originY + EXTENT[k][1] * radius, originZ + EXTENT[k][2] * radius, candidate);
+            }
+        }
 
         float age = 0.0f;
         for (int i = 0; i < MAX_SEGMENTS && age < duration; i++) {
@@ -203,14 +216,30 @@ public final class ParticleCollision {
             float next = age + step;
             ParticleMotion.position(style, start, velocity, next, at);
 
-            if (probe.probe(originX + previous.x, originY + previous.y, originZ + previous.z,
-                    originX + at.x, originY + at.y, originZ + at.z, hit)) {
-                float contact = age + hit.fraction * step;
+            boolean centre = probe.probe(originX + previous.x, originY + previous.y, originZ + previous.z,
+                    originX + at.x, originY + at.y, originZ + at.z, hit);
+            float fraction = centre ? hit.fraction : Float.MAX_VALUE;
+            boolean extent = false;
+            for (int k = 0; k < EXTENT.length; k++) {
+                if (!live[k]) {
+                    continue;
+                }
+                float ox = EXTENT[k][0] * radius, oy = EXTENT[k][1] * radius, oz = EXTENT[k][2] * radius;
+                if (probe.probe(originX + previous.x + ox, originY + previous.y + oy, originZ + previous.z + oz,
+                        originX + at.x + ox, originY + at.y + oy, originZ + at.z + oz, candidate)
+                        && candidate.fraction < fraction) {
+                    fraction = candidate.fraction;
+                    hit.fraction = candidate.fraction;
+                    hit.normal = candidate.normal;
+                    extent = true;
+                }
+            }
+            if (centre || extent) {
+                float contact = age + fraction * step;
                 float chord = previous.distance(at);
-                if (radius > 0.0f && chord > 1e-6f) {
-                    // Backed off in time rather than along the chord, so the adjustment can reach into an
-                    // earlier segment: a contact that lands on a segment boundary has no chord behind it to
-                    // give back. chord / step is the speed it is arriving at.
+                if (!extent && radius > 0.0f && chord > 1e-6f) {
+                    // Centre hit, no live offset caught it first: back off in time rather than along the
+                    // chord, so the adjustment can reach into an earlier segment. chord / step = arrival speed.
                     contact -= radius * step / chord;
                 }
                 return Math.max(0.0f, contact);

@@ -44,6 +44,7 @@ def ktxPlatforms = ['natives-linux', 'natives-windows', 'natives-macos', 'native
 stonecutter.constants.put('ktx', ktxSupported)
 stonecutter.constants.put('iris', iris_supported.toBoolean())
 stonecutter.constants.put('water', water_supported.toBoolean())
+stonecutter.constants.put('lights', lights_supported.toBoolean())
 stonecutter.constants.put('direct', direct_supported.toBoolean())
 
 stonecutter.replacements.string(stonecutter.eval(mcVersion, '>=26.1')) {
@@ -383,12 +384,20 @@ if (!direct_supported.toBoolean()) {
 // handlers carried no event data at all. The direct mixins target vanilla, not the loader.
 sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplitEvents.java'
 sourceSets.main.java.exclude 'com/wf/gemrender/direct/DirectEvents.java'
+sourceSets.main.java.exclude 'com/wf/gemrender/medium/CameraMediumEvents.java'
 sourceSets.main.java.exclude 'com/wf/gemrender/iris/IrisPbrEvents.java'
 
 // The mixins are NOT excluded either. gemrender.mixins.json names all nine unconditionally, and
 // dropping a class here while leaving its name in a `required` config is a hard load failure;
 // dropping DrawManagerMixin means no buffer is ever uploaded and nothing draws at all. The members
 // that reach for WaterSplit are behind `//? if water` instead.
+if (!lights_supported.toBoolean()) {
+    sourceSets.main.java.exclude 'com/wf/gemrender/light/**'
+    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/light/**'
+    sourceSets.main.resources.exclude 'gemrender.light.mixins.json'
+    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/LightSpike.java'
+}
+
 if (!water_supported.toBoolean()) {
     sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplit.java'
     sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplitPrograms.java'

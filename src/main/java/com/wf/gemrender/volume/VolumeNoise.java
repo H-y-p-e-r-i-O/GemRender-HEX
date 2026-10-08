@@ -23,9 +23,52 @@ public final class VolumeNoise {
 
     private static final VolumeNoise INSTANCE = new VolumeNoise();
 
+    private static final int MEAN_SAMPLES = 1 << 16;
+
+    /** {@link #densityByShape} entries, shape 0..1. */
+    public static final int SHAPE_STEPS = 17;
+
+    private static volatile float[] densityByShape;
+
     private int textureId;
 
     private VolumeNoise() {
+    }
+
+    /**
+     * {@code E[max(1.6 n - 0.3 - (1 - shape) 1.3, 0)]} of {@code gemrender_volumeDensity} at shape
+     * {@code i / (SHAPE_STEPS - 1)}, over this texture (coarse and fine octaves at independent points: the shader
+     * samples them at incommensurate scales).
+     */
+    public static float[] densityByShape() {
+        float[] table = densityByShape;
+        if (table == null) {
+            ByteBuffer pixels = ByteBuffer.allocate(SIZE * SIZE * SIZE * 4);
+            for (int channel = 0; channel < FREQUENCIES.length; channel++) {
+                fill(pixels, channel, FREQUENCIES[channel]);
+            }
+            Random random = new Random(SEED);
+            int texels = SIZE * SIZE * SIZE;
+            double[] sum = new double[SHAPE_STEPS];
+            for (int i = 0; i < MEAN_SAMPLES; i++) {
+                int coarse = random.nextInt(texels) * 4;
+                int fine = random.nextInt(texels) * 4;
+                float n = (pixels.get(coarse) & 0xFF) / 255.0f * 0.55f
+                        + (pixels.get(coarse + 1) & 0xFF) / 255.0f * 0.25f
+                        + (pixels.get(fine + 2) & 0xFF) / 255.0f * 0.13f
+                        + (pixels.get(fine + 3) & 0xFF) / 255.0f * 0.07f;
+                for (int s = 0; s < SHAPE_STEPS; s++) {
+                    float shape = s / (SHAPE_STEPS - 1.0f);
+                    sum[s] += Math.max(n * 1.6f - 0.3f - (1.0f - shape) * 1.3f, 0.0f);
+                }
+            }
+            table = new float[SHAPE_STEPS];
+            for (int s = 0; s < SHAPE_STEPS; s++) {
+                table[s] = (float) (sum[s] / MEAN_SAMPLES);
+            }
+            densityByShape = table;
+        }
+        return table;
     }
 
     public static VolumeNoise getInstance() {

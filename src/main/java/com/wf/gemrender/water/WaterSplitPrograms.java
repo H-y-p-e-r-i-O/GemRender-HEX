@@ -1,17 +1,18 @@
 package com.wf.gemrender.water;
 
-import com.wf.gemrender.Ids;
+
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.GemRender;
+import com.wf.gemrender.render.GlPrograms;
 import com.wf.gemrender.render.GlState;
 import com.wf.gemrender.render.Vanilla;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.ResourceLocation;
+
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+
+
 
 import static org.lwjgl.opengl.GL20C.*;
 import static org.lwjgl.opengl.GL30C.*;
@@ -23,6 +24,8 @@ import static org.lwjgl.opengl.GL33C.glDrawArrays;
 import static org.lwjgl.opengl.GL33C.glGetInteger;
 
 final class WaterSplitPrograms {
+    private static final String MOD = GemRender.MOD_ID;
+    private static final String FLYWHEEL = "flywheel";
     private static final String VERSION = "#version 420 core\n";
     private static final int UNIT_ACCUMULATE = 0;
     private static final int UNIT_FRONT = 1;
@@ -30,6 +33,9 @@ final class WaterSplitPrograms {
     private static final int UNIT_COEFFICIENTS = 3;
     private static final int UNIT_WATER_DEPTH = 4;
     private static final int UNIT_CLOUD_DEPTH = 5;
+    private static final int UNIT_EMISSION = 2;
+    private static final int UNIT_FRONT_EMISSION = 3;
+    private static final int UNIT_DEPTH_RANGE_ABSORBANCE = 4;
     private final int[] borrowed = new int[UNIT_CLOUD_DEPTH + 1];
     private final int[] borrowedSampler = new int[UNIT_CLOUD_DEPTH + 1];
     private int depthCopyProgram;
@@ -42,6 +48,13 @@ final class WaterSplitPrograms {
     private int depthCopyDepthLoc;
     private int depthCopySecondLoc;
     private int depthCopyTwoSourcesLoc;
+    private int depthFillProgram;
+    private int splitDepthProgram;
+    private int splitDepthZNearLoc;
+    private int splitDepthZFarLoc;
+    private int absorbanceZNearLoc;
+    private int absorbanceZFarLoc;
+    private int absorbanceCloudPhaseLoc;
     private int behindZNearLoc;
     private int behindZFarLoc;
     private int frontZNearLoc;
@@ -61,47 +74,22 @@ final class WaterSplitPrograms {
         glUniform1i(glGetUniformLocation(program, "_gr_cloudDepth"), UNIT_CLOUD_DEPTH);
     }
 
+    private static void bindAbsorbanceSamplers(int program) {
+        GlStateManager._glUseProgram(program);
+        glUniform1i(glGetUniformLocation(program, "_gr_depthRange"), UNIT_DEPTH_RANGE_ABSORBANCE);
+        glUniform1i(glGetUniformLocation(program, "_gr_accumulate"), UNIT_ACCUMULATE);
+        glUniform1i(glGetUniformLocation(program, "_gr_frontAccumulate"), UNIT_FRONT);
+        glUniform1i(glGetUniformLocation(program, "_gr_emission"), UNIT_EMISSION);
+        glUniform1i(glGetUniformLocation(program, "_gr_frontEmission"), UNIT_FRONT_EMISSION);
+    }
+
     private static void setZRange(int znearLoc, int zfarLoc) {
         glUniform1f(znearLoc, Vanilla.zNear());
         glUniform1f(zfarLoc, Vanilla.depthFar());
     }
 
-    private static String resource(String namespace, String path) throws IOException {
-        ResourceLocation location = Ids.of(namespace, path);
-        try (InputStream in = Minecraft.getInstance()
-                .getResourceManager()
-                .open(location)) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
 
-    private static int link(String name, String vertexSource, String fragmentSource) {
-        int vertex = compile(name, GL_VERTEX_SHADER, vertexSource);
-        int fragment = compile(name, GL_FRAGMENT_SHADER, fragmentSource);
 
-        int program = glCreateProgram();
-        glAttachShader(program, vertex);
-        glAttachShader(program, fragment);
-        glLinkProgram(program);
-        glDeleteShader(vertex);
-        glDeleteShader(fragment);
-
-        if (glGetProgrami(program, GL_LINK_STATUS) == 0) {
-            throw new IllegalStateException(name + " failed to link: " + glGetProgramInfoLog(program));
-        }
-        return program;
-    }
-
-    private static int compile(String name, int type, String source) {
-        int shader = glCreateShader(type);
-        glShaderSource(shader, source);
-        glCompileShader(shader);
-        if (glGetShaderi(shader, GL_COMPILE_STATUS) == 0) {
-            throw new IllegalStateException(name + (type == GL_VERTEX_SHADER ? " (vert)" : " (frag)")
-                    + " failed to compile: " + glGetShaderInfoLog(shader));
-        }
-        return shader;
-    }
 
     boolean ensureCreated() {
         if (created) {
@@ -112,40 +100,54 @@ final class WaterSplitPrograms {
         }
 
         try {
-            String wavelet = resource("flywheel", "flywheel/internal/wavelet.glsl");
-            String depth = resource("flywheel", "flywheel/internal/depth.glsl");
-            String vert = VERSION + resource(GemRender.MOD_ID, "shaders/water_split.vert");
+            String wavelet = GlPrograms.resource(FLYWHEEL, "flywheel/internal/wavelet.glsl");
+            String depth = GlPrograms.resource(FLYWHEEL, "flywheel/internal/depth.glsl");
+            String vert = VERSION + GlPrograms.resource(MOD, "shaders/water_split.vert");
 
-            depthCopyProgram = link("depth_copy",
-                    vert, VERSION + resource(GemRender.MOD_ID, "shaders/depth_copy.frag"));
-            behindProgram = link("water_behind",
-                    vert, VERSION + wavelet + depth + resource(GemRender.MOD_ID, "shaders/water_behind.frag"));
-            frontProgram = link("water_front",
-                    vert, VERSION + wavelet + depth + resource(GemRender.MOD_ID, "shaders/water_front.frag"));
+            depthCopyProgram = GlPrograms.link("depth_copy",
+                    vert, VERSION + GlPrograms.resource(MOD, "shaders/depth_copy.frag"));
+            behindProgram = GlPrograms.link("water_behind",
+                    vert, VERSION + wavelet + depth + GlPrograms.resource(MOD, "shaders/water_behind.frag"));
+            frontProgram = GlPrograms.link("water_front",
+                    vert, VERSION + wavelet + depth + GlPrograms.resource(MOD, "shaders/water_front.frag"));
 
             depthCopyDepthLoc = glGetUniformLocation(depthCopyProgram, "_gr_depth");
             depthCopySecondLoc = glGetUniformLocation(depthCopyProgram, "_gr_depth2");
             depthCopyTwoSourcesLoc = glGetUniformLocation(depthCopyProgram, "_gr_twoSources");
+            depthFillProgram = GlPrograms.link("depth_fill",
+                    VERSION + GlPrograms.resource(MOD, "shaders/depth_fill.vert"),
+                    VERSION + GlPrograms.resource(MOD, "shaders/depth_fill.frag"));
 
             bindSamplers(behindProgram);
             behindZNearLoc = glGetUniformLocation(behindProgram, "_gr_znear");
             behindZFarLoc = glGetUniformLocation(behindProgram, "_gr_zfar");
+
+            splitDepthProgram = GlPrograms.link("split_depth",
+                    vert, VERSION + depth + GlPrograms.resource(MOD, "shaders/split_depth.frag"));
+            bindSamplers(splitDepthProgram);
+            splitDepthZNearLoc = glGetUniformLocation(splitDepthProgram, "_gr_znear");
+            splitDepthZFarLoc = glGetUniformLocation(splitDepthProgram, "_gr_zfar");
 
             bindSamplers(frontProgram);
             frontZNearLoc = glGetUniformLocation(frontProgram, "_gr_znear");
             frontZFarLoc = glGetUniformLocation(frontProgram, "_gr_zfar");
             frontCloudPhaseLoc = glGetUniformLocation(frontProgram, "_gr_cloudPhase");
 
-            absorbanceCompositeProgram = link("absorbance_composite",
-                    vert, VERSION + resource(GemRender.MOD_ID, "shaders/absorbance_composite.frag"));
-            absorbanceBehindProgram = link("absorbance_behind",
-                    vert, VERSION + resource(GemRender.MOD_ID, "shaders/absorbance_behind.frag"));
-            absorbanceFrontProgram = link("absorbance_front",
-                    vert, VERSION + resource(GemRender.MOD_ID, "shaders/absorbance_front.frag"));
+            String absorbance = VERSION + GlPrograms.resource(MOD, "shaders/absorbance.glsl");
+            absorbanceCompositeProgram = GlPrograms.link("absorbance_composite",
+                    vert, absorbance + depth + GlPrograms.resource(MOD, "shaders/absorbance_composite.frag"));
+            absorbanceBehindProgram = GlPrograms.link("absorbance_behind",
+                    vert, absorbance + GlPrograms.resource(MOD, "shaders/absorbance_behind.frag"));
+            absorbanceFrontProgram = GlPrograms.link("absorbance_front",
+                    vert, absorbance + GlPrograms.resource(MOD, "shaders/absorbance_front.frag"));
 
-            bindSamplers(absorbanceCompositeProgram);
-            bindSamplers(absorbanceBehindProgram);
-            bindSamplers(absorbanceFrontProgram);
+            bindAbsorbanceSamplers(absorbanceCompositeProgram);
+            absorbanceZNearLoc = glGetUniformLocation(absorbanceCompositeProgram, "_gr_znear");
+            absorbanceZFarLoc = glGetUniformLocation(absorbanceCompositeProgram, "_gr_zfar");
+            bindAbsorbanceSamplers(absorbanceBehindProgram);
+            bindAbsorbanceSamplers(absorbanceFrontProgram);
+            glUniform1i(glGetUniformLocation(absorbanceFrontProgram, "_gr_cloudDepth"), UNIT_CLOUD_DEPTH);
+            absorbanceCloudPhaseLoc = glGetUniformLocation(absorbanceFrontProgram, "_gr_cloudPhase");
 
             GlStateManager._glUseProgram(0);
             vao = glGenVertexArrays();
@@ -176,6 +178,17 @@ final class WaterSplitPrograms {
         }
     }
 
+    /** Depth 0 wherever the stencil test passes. */
+    void drawDepthFill() {
+        int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
+        try {
+            GlStateManager._glUseProgram(depthFillProgram);
+            drawFullscreen();
+        } finally {
+            GlStateManager._glUseProgram(previousProgram);
+        }
+    }
+
     void drawBehind(int accumulate, int front, int depthRange, int coefficients, int waterDepth,
                     int cloudDepth) {
         int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
@@ -185,6 +198,22 @@ final class WaterSplitPrograms {
             bindCompositeTextures(accumulate, front, depthRange, coefficients, waterDepth, cloudDepth);
             drawFullscreen();
             unbindCompositeTextures();
+        } finally {
+            GlStateManager._glUseProgram(previousProgram);
+        }
+    }
+
+    void drawSplitDepth(int depthRange, int waterDepth) {
+        int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
+        try {
+            GlStateManager._glUseProgram(splitDepthProgram);
+            setZRange(splitDepthZNearLoc, splitDepthZFarLoc);
+            bind2d(UNIT_DEPTH_RANGE, depthRange);
+            bind2d(UNIT_WATER_DEPTH, waterDepth);
+            drawFullscreen();
+            unbind(UNIT_WATER_DEPTH);
+            unbind(UNIT_DEPTH_RANGE);
+            GlStateManager._activeTexture(GL_TEXTURE0);
         } finally {
             GlStateManager._glUseProgram(previousProgram);
         }
@@ -205,30 +234,58 @@ final class WaterSplitPrograms {
         }
     }
 
-    void drawAbsorbanceComposite(int accumulate) {
-        drawAccumulators(absorbanceCompositeProgram, accumulate, 0);
+    void drawAbsorbanceComposite(Absorbance a, int depthRange) {
+        int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
+        try {
+            GlStateManager._glUseProgram(absorbanceCompositeProgram);
+            setZRange(absorbanceZNearLoc, absorbanceZFarLoc);
+            bind2d(UNIT_DEPTH_RANGE_ABSORBANCE, depthRange);
+            drawAccumulators(absorbanceCompositeProgram, a.accumulateTexture(), 0, a.emissionTexture(), 0);
+            unbind(UNIT_DEPTH_RANGE_ABSORBANCE);
+            GlStateManager._activeTexture(GL_TEXTURE0);
+        } finally {
+            GlStateManager._glUseProgram(previousProgram);
+        }
     }
 
-    void drawAbsorbanceBehind(int accumulate, int front) {
-        drawAccumulators(absorbanceBehindProgram, accumulate, front);
+    void drawAbsorbanceBehind(Absorbance a) {
+        drawAccumulators(absorbanceBehindProgram, a.accumulateTexture(), a.frontTexture(), a.emissionTexture(),
+                a.frontEmissionTexture());
     }
 
-    void drawAbsorbanceFront(int front) {
-        drawAccumulators(absorbanceFrontProgram, 0, front);
+    void drawAbsorbanceFront(Absorbance a, int cloudDepth, float cloudPhase) {
+        int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
+        try {
+            GlStateManager._glUseProgram(absorbanceFrontProgram);
+            glUniform1f(absorbanceCloudPhaseLoc, cloudPhase);
+            bind2d(UNIT_CLOUD_DEPTH, cloudDepth);
+            drawAccumulators(absorbanceFrontProgram, 0, a.frontTexture(), 0, a.frontEmissionTexture());
+            unbind(UNIT_CLOUD_DEPTH);
+            GlStateManager._activeTexture(GL_TEXTURE0);
+        } finally {
+            GlStateManager._glUseProgram(previousProgram);
+        }
     }
 
-    private void drawAccumulators(int program, int accumulate, int front) {
+    /** Premultiplied (shaders/absorbance.glsl); leaves the callers' (SRC_ALPHA, ONE_MINUS_SRC_ALPHA). */
+    private void drawAccumulators(int program, int accumulate, int front, int emission, int frontEmission) {
         int previousProgram = glGetInteger(GL_CURRENT_PROGRAM);
         try {
             GlStateManager._glUseProgram(program);
+            GlStateManager._blendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             bind2d(UNIT_ACCUMULATE, accumulate);
             bind2d(UNIT_FRONT, front);
+            bind2d(UNIT_EMISSION, emission);
+            bind2d(UNIT_FRONT_EMISSION, frontEmission);
             GlStateManager._activeTexture(GL_TEXTURE0);
             drawFullscreen();
+            unbind(UNIT_FRONT_EMISSION);
+            unbind(UNIT_EMISSION);
             unbind(UNIT_FRONT);
             unbind(UNIT_ACCUMULATE);
             GlStateManager._activeTexture(GL_TEXTURE0);
         } finally {
+            GlStateManager._blendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             GlStateManager._glUseProgram(previousProgram);
         }
     }

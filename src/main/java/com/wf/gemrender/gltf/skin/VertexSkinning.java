@@ -39,6 +39,30 @@ public final class VertexSkinning {
                 BoneAttributeCodec.packJoints(slot, slot, slot, slot), channels, 1);
     }
 
+    /** {@code slots}/{@code weights}: 4 palette slots + weights per vertex, weights summing to 1. */
+    public static VertexSkinning weighted(int vertexCount, int[] slots, float[] weights) {
+        int[] packed = new int[vertexCount];
+        float[] channels = new float[vertexCount * WEIGHTS_PER_VERTEX];
+        int[] quantised = new int[WEIGHTS_PER_VERTEX];
+        int maxInfluences = 0;
+        for (int v = 0; v < vertexCount; v++) {
+            int o = v * WEIGHTS_PER_VERTEX;
+            int influences = 0;
+            for (int i = 0; i < WEIGHTS_PER_VERTEX; i++) {
+                if (weights[o + i] > 0) {
+                    influences++;
+                }
+            }
+            maxInfluences = Math.max(maxInfluences, influences);
+            BoneAttributeCodec.quantizeWeights(weights, o, quantised);
+            packed[v] = BoneAttributeCodec.packJoints(slots[o], slots[o + 1], slots[o + 2], slots[o + 3]);
+            for (int i = 0; i < WEIGHTS_PER_VERTEX; i++) {
+                channels[o + i] = BoneAttributeCodec.weightChannel(quantised[i]);
+            }
+        }
+        return new VertexSkinning(vertexCount, packed, channels, 0, null, maxInfluences);
+    }
+
     public static VertexSkinning of(MeshPrimitiveModel primitive, int vertexCount, int[] jointSlots) {
         Map<String, AccessorModel> attributes = primitive.getAttributes();
         if (!attributes.containsKey("JOINTS_0")) {

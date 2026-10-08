@@ -28,8 +28,21 @@ import static org.lwjgl.opengl.GL11C.glDrawBuffer;
 import static org.lwjgl.opengl.GL11C.glGenTextures;
 import static org.lwjgl.opengl.GL11C.glReadBuffer;
 import static org.lwjgl.opengl.GL11C.glTexImage2D;
+import static org.lwjgl.opengl.GL11C.GL_ALWAYS;
+import static org.lwjgl.opengl.GL11C.GL_EQUAL;
+import static org.lwjgl.opengl.GL11C.GL_KEEP;
+import static org.lwjgl.opengl.GL11C.GL_LESS;
+import static org.lwjgl.opengl.GL11C.GL_REPLACE;
+import static org.lwjgl.opengl.GL11C.GL_STENCIL_BUFFER_BIT;
+import static org.lwjgl.opengl.GL11C.GL_STENCIL_TEST;
+import static org.lwjgl.opengl.GL11C.glDisable;
+import static org.lwjgl.opengl.GL11C.glEnable;
+import static org.lwjgl.opengl.GL30C.GL_DEPTH32F_STENCIL8;
 import static org.lwjgl.opengl.GL30C.GL_DEPTH_ATTACHMENT;
 import static org.lwjgl.opengl.GL30C.GL_DEPTH_COMPONENT32F;
+import static org.lwjgl.opengl.GL30C.GL_DEPTH_STENCIL;
+import static org.lwjgl.opengl.GL30C.GL_DEPTH_STENCIL_ATTACHMENT;
+import static org.lwjgl.opengl.GL30C.GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
 import static org.lwjgl.opengl.GL30C.GL_FRAMEBUFFER;
 import static org.lwjgl.opengl.GL30C.glDeleteFramebuffers;
 import static org.lwjgl.opengl.GL30C.glGenFramebuffers;
@@ -172,7 +185,12 @@ final class WaterDepthPrepass {
 	}
 *///?}
 
-    void run(LevelStage stage, WaterSplitPrograms programs, boolean foldClouds) {
+    /**
+     * @return false => nothing translucent and no folded cloud on screen: no split this frame. Else split depth
+     * = water / cloud where in front of the scene, 0 elsewhere (front resubmit depth-rejected there; behind
+     * composite takes the whole stack).
+     */
+    boolean run(LevelStage stage, WaterSplitPrograms programs, boolean foldClouds) {
         Minecraft mc = Minecraft.getInstance();
         RenderTarget main = mc.getMainRenderTarget();
         ensureSize(main.width, main.height);
@@ -185,10 +203,15 @@ final class WaterDepthPrepass {
         try {
             //? if >=26.1 {
             /*replay(stage, main);
+            return true;
              *///?} else {
 
             foldedClouds = foldClouds && drawCloudDepth(stage);
+            if (!foldedClouds && !translucentVisible(stage)) {
+                return false;
+            }
             redraw(stage, programs, main, foldedClouds ? cloudDepthTexture : 0);
+            return true;
             //?}
         } finally {
             rendering = false;
@@ -206,24 +229,65 @@ final class WaterDepthPrepass {
 
         GlStateManager._disableBlend();
         GlStateManager._enableDepthTest();
-        GlStateManager._depthFunc(GL11C.GL_ALWAYS);
         GlStateManager._depthMask(true);
-        programs.drawDepthCopy(Vanilla.depthTextureId(main), cloudDepth);
-        GlStateManager._depthFunc(GL_LEQUAL);
+        GlStateManager._stencilMask(0xFF);
+        GlStateManager._clearStencil(0);
+        GlState.clear(GL_STENCIL_BUFFER_BIT);
+        GlStateManager._depthFunc(GL_ALWAYS);
+        int scene = Vanilla.depthTextureId(main);
+        programs.drawDepthCopy(scene, 0);
 
-        //? if >=1.21 {
-        var camera = stage.camera()
-                .getPosition();
-        ((LevelRendererAccessor) stage.levelRenderer()).gemrender$renderSectionLayer(
-                RenderType.translucent(), camera.x, camera.y, camera.z, stage.modelViewMatrix(),
-                stage.projectionMatrix());
-        //?} else {
+        // Stencil 1 = cloud / translucent in front of the scene.
+        glEnable(GL_STENCIL_TEST);
+        try {
+            GlStateManager._stencilFunc(GL_ALWAYS, 1, 0xFF);
+            GlStateManager._stencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            if (cloudDepth != 0) {
+                GlStateManager._depthFunc(GL_LESS);
+                programs.drawDepthCopy(scene, cloudDepth);
+            }
+            GlStateManager._depthFunc(GL_LEQUAL);
+
+            //? if >=1.21 {
+            var camera = stage.camera()
+                    .getPosition();
+            ((LevelRendererAccessor) stage.levelRenderer()).gemrender$renderSectionLayer(
+                    RenderType.translucent(), camera.x, camera.y, camera.z, stage.modelViewMatrix(),
+                    stage.projectionMatrix());
+            //?} else {
 		/*var camera = stage.camera()
 				.getPosition();
 		((LevelRendererAccessor) stage.levelRenderer()).gemrender$renderSectionLayer(
 				RenderType.translucent(), stage.poseStack(), camera.x, camera.y, camera.z,
 				stage.projectionMatrix());
 *///?}
+
+            GlStateManager._stencilFunc(GL_EQUAL, 0, 0xFF);
+            GlStateManager._stencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+            GlStateManager._depthMask(true);
+            GlStateManager._depthFunc(GL_ALWAYS);
+            programs.drawDepthFill();
+        } finally {
+            GlStateManager._stencilFunc(GL_ALWAYS, 0, 0xFF);
+            GlStateManager._stencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+            glDisable(GL_STENCIL_TEST);
+        }
+    }
+
+    private static boolean translucentVisible(LevelStage stage) {
+        //? if >=1.21 {
+        RenderType translucent = RenderType.translucent();
+        for (var section : ((LevelRendererAccessor) stage.levelRenderer()).gemrender$visibleSections()) {
+            if (!section.getCompiled()
+                    .isEmpty(translucent)) {
+                return true;
+            }
+        }
+        return false;
+        //?} else {
+        /*// TODO 1.20.1: LevelRenderer.RenderChunkInfo package-private; gate needs an accessor on it.
+        return true;
+        *///?}
     }
 
     private boolean drawCloudDepth(LevelStage stage) {
@@ -325,8 +389,8 @@ final class WaterDepthPrepass {
         int previousTexture = GL11C.glGetInteger(GL11C.GL_TEXTURE_BINDING_2D);
         try {
             GlStateManager._bindTexture(depthTexture);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT,
-                    GL_FLOAT, (java.nio.ByteBuffer) null);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH32F_STENCIL8, width, height, 0, GL_DEPTH_STENCIL,
+                    GL_FLOAT_32_UNSIGNED_INT_24_8_REV, (java.nio.ByteBuffer) null);
             setSamplingParameters();
         } finally {
             GlStateManager._bindTexture(previousTexture);
@@ -334,7 +398,7 @@ final class WaterDepthPrepass {
 
         fbo = glGenFramebuffers();
         GlStateManager._glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTexture, 0);
+        glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, depthTexture, 0);
 
         glDrawBuffer(GL_NONE);
         glReadBuffer(GL_NONE);

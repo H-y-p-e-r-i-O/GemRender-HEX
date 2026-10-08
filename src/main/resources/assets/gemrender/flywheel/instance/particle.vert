@@ -11,6 +11,8 @@ void flw_instanceVertex(in FlwInstance i) {
 
     vec3 center = i.origin + gemrender_particlePosition(p, s, age);
     float size = gemrender_particleAlive(p, age) ? gemrender_particleSize(p, s, unitAge) : 0.0;
+    float near = gemrender_nearFade(center, flw_cameraPos, size) * gemrender_cullFade(center, flw_cameraPos, s.cull);
+    size *= step(1e-4, near);
 
     float angle = p.spinPhase + s.spinRate * age;
     float cosine = cos(angle);
@@ -23,7 +25,8 @@ void flw_instanceVertex(in FlwInstance i) {
 
     flw_vertexPos = vec4(center + (corner.x * spunRight + corner.y * spunUp) * size, 1.0);
     flw_vertexNormal = -vec3(flw_viewInverse[2]);
-    flw_vertexColor = gemrender_particleColor(p, s, unitAge);
-    flw_vertexOverlay = ivec2(0, 10);
+    vec4 color = gemrender_particleColor(p, s, unitAge);
+    flw_vertexColor = vec4(color.rgb, color.a * near);
+    flw_vertexOverlay = gemrender_particleOverlay(gemrender_particleHeat(s, unitAge));
     flw_vertexLight = gemrender_particleLight(p, s);
 }

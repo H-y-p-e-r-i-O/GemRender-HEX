@@ -60,6 +60,8 @@ def flywheelVendored = flywheel_vendored.toBoolean()
 def waterSupported = water_supported.toBoolean()
 
 def directSupported = direct_supported.toBoolean()
+
+def lightsSupported = lights_supported.toBoolean()
 def directMixinSet = stonecutter.eval(mcVersion, '>=26.1') ? 'direct26' : 'direct'
 def renderDocCompat = stonecutter.eval(mcVersion, '>=26.1')
 def directMixinConfig = "gemrender.${directMixinSet}.mixins.json"
@@ -70,6 +72,7 @@ stonecutter.constants.put('ktx', ktxSupported)
 stonecutter.constants.put('iris', irisSupported)
 stonecutter.constants.put('water', waterSupported)
 stonecutter.constants.put('direct', directSupported)
+stonecutter.constants.put('lights', lightsSupported)
 
 stonecutter.replacements.string(stonecutter.eval(mcVersion, '>=26.1')) {
     replace('ResourceLocation', 'Identifier')
@@ -310,6 +313,13 @@ if (!irisSupported || !colorwheel_version) {
     }
 }
 
+if (!lightsSupported) {
+    sourceSets.main.java.exclude 'com/wf/gemrender/light/**'
+    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/light/**'
+    sourceSets.main.resources.exclude 'gemrender.light.mixins.json'
+    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/LightSpike.java'
+}
+
 if (!directSupported) {
     sourceSets.main.java.exclude 'com/wf/gemrender/direct/**'
 
@@ -386,6 +396,8 @@ configurations {
 
     shaderMod
 
+    sodiumMod
+
     // The Colorwheel bridge, resolved only when -Pcolorwheel asks for it: it and iris-flw-compat do
     // the same job and cannot be installed together.
     colorwheelMod
@@ -433,6 +445,10 @@ dependencies {
             add(ktxRuntime, "org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
             jarJar("org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
         }
+    }
+
+    if (project.findProperty('sodium_standalone_version')) {
+        sodiumMod("maven.modrinth:sodium:${sodium_standalone_version}") { transitive = false }
     }
 
     if (irisSupported) {
@@ -718,6 +734,7 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
 
             direct_path            : directSupported,
             direct_config          : directMixinConfig,
+            light_path             : lightsSupported,
             iris_path              : irisSupported,
 
             flywheel_vendored_version: flywheel_vendored_version,

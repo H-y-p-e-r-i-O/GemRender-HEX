@@ -1,22 +1,23 @@
 package com.wf.gemrender.volume;
 
-import com.wf.gemrender.Ids;
+
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.wf.gemrender.GemRender;
 import com.wf.gemrender.render.GlAudit;
+import com.wf.gemrender.render.GlPrograms;
 import com.wf.gemrender.render.GlState;
 import com.wf.gemrender.render.TextureUnits;
 import com.wf.gemrender.render.Vanilla;
 import com.wf.gemrender.water.PassState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.ResourceLocation;
+
 import org.lwjgl.opengl.GL11C;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+
+
 
 import static org.lwjgl.opengl.GL11C.*;
 import static org.lwjgl.opengl.GL12C.GL_CLAMP_TO_EDGE;
@@ -32,6 +33,7 @@ import static org.lwjgl.opengl.GL33C.glGetInteger;
 import static org.lwjgl.opengl.GL33C.glTexImage2D;
 
 public final class SceneDepth {
+    private static final String MOD = GemRender.MOD_ID;
     public static final int TEXTURE_UNIT = TextureUnits.SCENE_DEPTH;
 
     private static final String VERSION = "#version 420 core\n";
@@ -71,42 +73,8 @@ public final class SceneDepth {
         return INSTANCE;
     }
 
-    private static String resource(String path) throws IOException {
-        ResourceLocation location = Ids.of(GemRender.MOD_ID, path);
-        try (InputStream in = Minecraft.getInstance()
-                .getResourceManager()
-                .open(location)) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
 
-    private static int link(String name, String vertexSource, String fragmentSource) {
-        int vertex = compile(name, GL_VERTEX_SHADER, vertexSource);
-        int fragment = compile(name, GL_FRAGMENT_SHADER, fragmentSource);
 
-        int id = glCreateProgram();
-        glAttachShader(id, vertex);
-        glAttachShader(id, fragment);
-        glLinkProgram(id);
-        glDeleteShader(vertex);
-        glDeleteShader(fragment);
-
-        if (glGetProgrami(id, GL_LINK_STATUS) == 0) {
-            throw new IllegalStateException(name + " failed to link: " + glGetProgramInfoLog(id));
-        }
-        return id;
-    }
-
-    private static int compile(String name, int type, String source) {
-        int shader = glCreateShader(type);
-        glShaderSource(shader, source);
-        glCompileShader(shader);
-        if (glGetShaderi(shader, GL_COMPILE_STATUS) == 0) {
-            throw new IllegalStateException(name + (type == GL_VERTEX_SHADER ? " (vert)" : " (frag)")
-                    + " failed to compile: " + glGetShaderInfoLog(shader));
-        }
-        return shader;
-    }
 
     public int textureId() {
         return texture;
@@ -186,8 +154,9 @@ public final class SceneDepth {
         }
 
         try {
-            program = link("scene_depth", VERSION + resource("shaders/water_split.vert"),
-                    VERSION + resource("shaders/scene_depth.frag"));
+            program = GlPrograms.link("scene_depth",
+                    VERSION + GlPrograms.resource(MOD, "shaders/water_split.vert"),
+                    VERSION + GlPrograms.resource(MOD, "shaders/scene_depth.frag"));
 
             depthLoc = glGetUniformLocation(program, "_gr_depth");
             znearLoc = glGetUniformLocation(program, "_gr_znear");

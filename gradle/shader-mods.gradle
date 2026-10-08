@@ -14,6 +14,9 @@
 
 ext.irisEnabled = project.hasProperty('iris') && project.property('iris').toString() != 'false'
 
+// Sodium alone (sodium_standalone_version): the pack's chunk renderer without Iris.
+def sodiumAlone = project.hasProperty('sodium') && project.property('sodium').toString() != 'false'
+
 // Swaps the Flywheel/Iris bridge. iris-flw-compat is the default; Colorwheel is the other
 // implementation of the same job and the two cannot be installed together, so this picks one:
 //     ./gradlew :1.21.1:runClient -Piris -Pshaders=<pack>.zip -Pcolorwheel
@@ -62,7 +65,16 @@ tasks.register('prepareRunMods') {
         modsDir.listFiles({ File f -> f.name.endsWith('.jar') } as FileFilter)
                 ?.each { it.delete() }
 
-        if (irisEnabled) {
+        if (sodiumAlone) {
+            if (irisEnabled) {
+                throw new GradleException('-Psodium stages Sodium without Iris; drop -Piris.')
+            }
+            copy {
+                from configurations.sodiumMod
+                into modsDir
+            }
+            logger.lifecycle "Shader stack: ${configurations.sodiumMod.files*.name.join(', ')} (no Iris)"
+        } else if (irisEnabled) {
             def others = configurations.shaderMod.findAll { !it.name.contains('iris-flw-compat') }
             def bridge
             if (colorwheelRequested) {

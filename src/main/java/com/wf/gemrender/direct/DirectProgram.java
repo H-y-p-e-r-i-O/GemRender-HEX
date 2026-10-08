@@ -22,6 +22,14 @@ import static org.lwjgl.opengl.GL20C.*;
 final class DirectProgram {
     private static final String VERSION = "#version 330 core\n";
 
+    //? if lights {
+    private static final String LIGHTS_DEFINE = "#define GEMRENDER_LIGHTS\n";
+    private static final String LIGHTS_INCLUDE = com.wf.gemrender.light.LightShaders.include();
+    //?} else {
+    /*private static final String LIGHTS_DEFINE = "";
+    private static final String LIGHTS_INCLUDE = "";
+    *///?}
+
     private static final DirectProgram INSTANCE = new DirectProgram();
 
     private int program;
@@ -98,8 +106,8 @@ final class DirectProgram {
             String morph = resource(GemRender.MOD_ID, "flywheel/morph.glsl");
 
             program = link("direct",
-                    VERSION + skinning + morph + resource(GemRender.MOD_ID, "shaders/direct.vert"),
-                    VERSION + resource(GemRender.MOD_ID, "flywheel/paint_pack.glsl")
+                    VERSION + LIGHTS_DEFINE + skinning + morph + resource(GemRender.MOD_ID, "shaders/direct.vert"),
+                    VERSION + LIGHTS_INCLUDE + resource(GemRender.MOD_ID, "flywheel/paint_pack.glsl")
                             + include(resource(GemRender.MOD_ID, "flywheel/paint.glsl"))
                             + resource(GemRender.MOD_ID, "shaders/direct.frag"));
 
@@ -118,6 +126,9 @@ final class DirectProgram {
             glUniform1i(glGetUniformLocation(program, "_gemrender_morphs"), MorphBuffer.TEXTURE_UNIT);
             glUniform1i(glGetUniformLocation(program, "_gemrender_paint"), PaintArray.TEXTURE_UNIT);
             GlStateManager._glUseProgram(0);
+            //? if lights {
+            com.wf.gemrender.light.LightShaders.bindProgram(program);
+            //?}
 
             created = true;
             GemRender.LOGGER.info("Direct program linked; items, armour and held models will draw "

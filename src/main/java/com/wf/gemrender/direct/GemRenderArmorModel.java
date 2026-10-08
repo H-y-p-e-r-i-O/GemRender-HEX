@@ -89,6 +89,23 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
             "left_leg", "left_leg",
             "right_leg", "right_leg");
 
+    /** Part order of {@code slots} in {@link ArmorRig#pose}. */
+    public static final java.util.List<String> PARTS = java.util.List.of("head", "body", "left_arm", "right_arm",
+            "left_leg", "right_leg");
+
+    @Nullable
+    private static volatile ArmorRig rig;
+
+    /** Installs the wearer body rig; before armour models load (import-time patch). */
+    public static void setRig(@Nullable ArmorRig body) {
+        rig = body;
+    }
+
+    @Nullable
+    public static ArmorRig rig() {
+        return rig;
+    }
+
     private final ArmorAppearance appearance;
     private final Map<String, String> bones;
 
@@ -225,6 +242,10 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
         applyPart(table, state, binding[3], rightArm);
         applyPart(table, state, binding[4], leftLeg);
         applyPart(table, state, binding[5], rightLeg);
+        ArmorRig body = rig;
+        if (body != null) {
+            body.pose(this, table, state, binding);
+        }
 
         pose.pushPose();
         try {
@@ -262,12 +283,11 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
     }
 
     private int[] resolve(NodeTable table) {
-        String[] parts = {"head", "body", "left_arm", "right_arm", "left_leg", "right_leg"};
-        int[] slots = new int[parts.length];
+        int[] slots = new int[PARTS.size()];
         int found = 0;
 
-        for (int i = 0; i < parts.length; i++) {
-            String node = bones.get(parts[i]);
+        for (int i = 0; i < slots.length; i++) {
+            String node = bones.get(PARTS.get(i));
             slots[i] = node == null ? -1 : table.slotOfName(node);
             if (slots[i] >= 0) {
                 found++;

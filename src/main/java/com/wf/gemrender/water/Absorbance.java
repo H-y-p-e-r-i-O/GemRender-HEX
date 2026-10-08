@@ -16,23 +16,33 @@ import static org.lwjgl.opengl.GL33C.glTexImage2D;
 public final class Absorbance {
     static final int WAVELET_SLOT = 5;
     static final int ABSORBANCE_SLOT = 6;
+    static final int EMISSION_SLOT = 7;
     private static final boolean ENABLED = !"false".equalsIgnoreCase(System.getProperty("gemrender.absorbance"));
     private static final int[] DRAW_WAVELET = {GL_COLOR_ATTACHMENT0 + WAVELET_SLOT};
-    private static final int[] DRAW_ABSORBANCE = {GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT};
+    private static final int[] DRAW_ABSORBANCE = {GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT,
+            GL_COLOR_ATTACHMENT0 + EMISSION_SLOT};
+    /** Non-glow: emission buffer unbound, no bandwidth. */
+    private static final int[] DRAW_SMOKE = {GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT, GL_NONE};
+    private static final int WAVELET = 0;
+    private static final int SMOKE = 1;
+    private static final int GLOW = 2;
 
     private static final float[] ZERO = {0f, 0f, 0f, 0f};
 
     private static final Absorbance INSTANCE = new Absorbance();
     private final GpuStampTimer chainTimer = new GpuStampTimer();
     private volatile MaterialShaders[] shaders = new MaterialShaders[0];
+    private volatile MaterialShaders[] glowShaders = new MaterialShaders[0];
     private boolean sawAbsorbance;
     private boolean sawOther;
     private boolean present;
     private boolean exclusive;
     private boolean inEvaluate;
-    private boolean routedToAbsorbance;
+    private int route;
     private int accumulate;
     private int front;
+    private int emission;
+    private int frontEmission;
     private int width = -1;
     private int height = -1;
     private long framesPresent;
@@ -46,26 +56,34 @@ public final class Absorbance {
         return INSTANCE;
     }
 
-    public synchronized void register(MaterialShaders value) {
-        MaterialShaders[] current = shaders;
-        for (MaterialShaders existing : current) {
-            if (existing.equals(value)) {
-                return;
-            }
-        }
-
-        MaterialShaders[] next = java.util.Arrays.copyOf(current, current.length + 1);
-        next[current.length] = value;
-        shaders = next;
+    public void register(MaterialShaders value) {
+        register(value, false);
     }
 
-    private boolean isAbsorbance(Material material) {
-        MaterialShaders[] ours = shaders;
-        if (ours.length == 0) {
-            return false;
+    /**
+     * {@code glow}: fragment shader MUST include {@code gemrender:absorbance.glsl} and, under
+     * {@code _FLW_EVALUATE}, write {@code gemrender_emission} (unwritten bound draw buffer => undefined).
+     */
+    public synchronized void register(MaterialShaders value, boolean glow) {
+        if (glow) {
+            glowShaders = with(glowShaders, value);
+        } else {
+            shaders = with(shaders, value);
         }
+    }
 
-        MaterialShaders theirs = material.shaders();
+    private static MaterialShaders[] with(MaterialShaders[] current, MaterialShaders value) {
+        for (MaterialShaders existing : current) {
+            if (existing.equals(value)) {
+                return current;
+            }
+        }
+        MaterialShaders[] next = java.util.Arrays.copyOf(current, current.length + 1);
+        next[current.length] = value;
+        return next;
+    }
+
+    private static boolean contains(MaterialShaders[] ours, MaterialShaders theirs) {
         for (MaterialShaders candidate : ours) {
             if (candidate.equals(theirs)) {
                 return true;
@@ -74,10 +92,27 @@ public final class Absorbance {
         return false;
     }
 
-    public void observe(Material material) {
-        boolean mine = isAbsorbance(material);
+    private int routeOf(Material material) {
+        MaterialShaders theirs = material.shaders();
+        return contains(glowShaders, theirs) ? GLOW : contains(shaders, theirs) ? SMOKE : WAVELET;
+    }
 
-        if (mine) {
+    /**
+     * Exclusive frame: coefficient passes skipped. Fabulous keeps depth range: composite sorts against the
+     * other Fabulous layers by its nearest depth.
+     */
+    public boolean skips(dev.engine_room.flywheel.backend.compile.PipelineCompiler.OitMode mode) {
+        return exclusive && switch (mode) {
+            case EVALUATE, OFF -> false;
+            case DEPTH_RANGE -> !Minecraft.useShaderTransparency();
+            default -> true;
+        };
+    }
+
+    public void observe(Material material) {
+        int mine = routeOf(material);
+
+        if (mine != WAVELET) {
             sawAbsorbance = true;
         } else {
             sawOther = true;
@@ -87,9 +122,9 @@ public final class Absorbance {
             return;
         }
 
-        if (mine != routedToAbsorbance) {
-            routedToAbsorbance = mine;
-            glDrawBuffers(mine ? DRAW_ABSORBANCE : DRAW_WAVELET);
+        if (mine != route) {
+            route = mine;
+            glDrawBuffers(mine == GLOW ? DRAW_ABSORBANCE : mine == SMOKE ? DRAW_SMOKE : DRAW_WAVELET);
         }
     }
 
@@ -111,18 +146,16 @@ public final class Absorbance {
         }
 
         ensureTextures();
-        glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT, accumulate, 0);
+        attach(accumulate, emission);
 
         chainTimer.begin();
     }
 
     public void beginEvaluate() {
         inEvaluate = true;
-        routedToAbsorbance = false;
+        route = WAVELET;
 
-        glDrawBuffers(DRAW_ABSORBANCE);
-        glClearBufferfv(GL_COLOR, 0, ZERO);
-        glDrawBuffers(DRAW_WAVELET);
+        clearAbsorbance();
     }
 
     public void endEvaluate() {
@@ -131,8 +164,8 @@ public final class Absorbance {
         }
         inEvaluate = false;
 
-        if (routedToAbsorbance) {
-            routedToAbsorbance = false;
+        if (route != WAVELET) {
+            route = WAVELET;
             glDrawBuffers(DRAW_WAVELET);
         }
     }
@@ -147,12 +180,9 @@ public final class Absorbance {
             return;
         }
 
-        glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT, front, 0);
-
-        glDrawBuffers(DRAW_ABSORBANCE);
-        glClearBufferfv(GL_COLOR, 0, ZERO);
-        glDrawBuffers(DRAW_WAVELET);
-        routedToAbsorbance = false;
+        attach(front, frontEmission);
+        clearAbsorbance();
+        route = WAVELET;
     }
 
     public void endFrontResubmit() {
@@ -160,12 +190,24 @@ public final class Absorbance {
             return;
         }
 
-        if (routedToAbsorbance) {
-            routedToAbsorbance = false;
+        if (route != WAVELET) {
+            route = WAVELET;
             glDrawBuffers(DRAW_WAVELET);
         }
 
-        glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT, accumulate, 0);
+        attach(accumulate, emission);
+    }
+
+    private static void attach(int absorbance, int glow) {
+        glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + ABSORBANCE_SLOT, absorbance, 0);
+        glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + EMISSION_SLOT, glow, 0);
+    }
+
+    private static void clearAbsorbance() {
+        glDrawBuffers(DRAW_ABSORBANCE);
+        glClearBufferfv(GL_COLOR, 0, ZERO);
+        glClearBufferfv(GL_COLOR, 1, ZERO);
+        glDrawBuffers(DRAW_WAVELET);
     }
 
     public boolean present() {
@@ -184,6 +226,14 @@ public final class Absorbance {
         return front;
     }
 
+    public int emissionTexture() {
+        return emission;
+    }
+
+    public int frontEmissionTexture() {
+        return frontEmission;
+    }
+
     private void ensureTextures() {
         Minecraft mc = Minecraft.getInstance();
         int newWidth = mc.getMainRenderTarget().width;
@@ -198,6 +248,8 @@ public final class Absorbance {
         if (accumulate != 0) {
             glDeleteTextures(accumulate);
             glDeleteTextures(front);
+            glDeleteTextures(emission);
+            glDeleteTextures(frontEmission);
         }
 
         int previousTexture = org.lwjgl.opengl.GL11C.glGetInteger(
@@ -205,11 +257,16 @@ public final class Absorbance {
         try {
             accumulate = allocate();
             front = allocate();
+            emission = allocate();
+            frontEmission = allocate();
         } finally {
             GlStateManager._bindTexture(previousTexture);
         }
     }
 
+    /**
+     * R11F_G11F_B10F FORBIDDEN: blend truncates toward zero (radeonsi navi31), sum of 150 adds -32% (RGBA16F -2.3%).
+     */
     private int allocate() {
         int texture = glGenTextures();
         GlStateManager._bindTexture(texture);

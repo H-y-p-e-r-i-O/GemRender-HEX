@@ -54,23 +54,63 @@ public final class GltfImporter {
 
     public static GemRenderGltfModel load(ResourceLocation location, ResourceLocation id,
                                           List<Map<ResourceLocation, ResourceLocation>> variants) throws IOException {
+        return load(location, id, variants, null);
+    }
+
+    public static GemRenderGltfModel load(ResourceLocation location, ResourceLocation id,
+                                          List<Map<ResourceLocation, ResourceLocation>> variants,
+                                          @org.jetbrains.annotations.Nullable RigPatch patch) throws IOException {
         try (InputStream in = Minecraft.getInstance()
                 .getResourceManager()
                 .getResourceOrThrow(location)
                 .open()) {
             GltfModel gltf = new GltfModelReader().readWithoutReferences(in);
-            return convert(gltf, location, id, variants);
+            return convert(gltf, location, id, variants, patch == null ? Map.of() : patch(gltf, patch));
         }
     }
 
+    private static Map<NodeModel, RigPatch.Weigher> patch(GltfModel gltf, RigPatch patch) {
+        if (!(gltf instanceof com.wf.gemrender.vendor.jgltf.model.impl.DefaultGltfModel model)) {
+            throw new IllegalArgumentException("rig patch needs a mutable glTF model, got " + gltf.getClass());
+        }
+        Map<NodeModel, RigPatch.Weigher> weighers = new java.util.IdentityHashMap<>();
+        patch.patch(new RigPatch.Rig() {
+            @Override
+            public NodeModel node(String name) {
+                for (NodeModel node : model.getNodeModels()) {
+                    if (name.equals(node.getName())) {
+                        return node;
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            public NodeModel addJoint(NodeModel parent, String name) {
+                var joint = new com.wf.gemrender.vendor.jgltf.model.impl.DefaultNodeModel();
+                joint.setName(name);
+                ((com.wf.gemrender.vendor.jgltf.model.impl.DefaultNodeModel) parent).addChild(joint);
+                model.addNodeModel(joint);
+                return joint;
+            }
+
+            @Override
+            public void weigh(NodeModel owner, RigPatch.Weigher weigher) {
+                weighers.put(owner, weigher);
+            }
+        });
+        return weighers;
+    }
+
     private static GemRenderGltfModel convert(GltfModel gltf, ResourceLocation source,
-                                              ResourceLocation id, List<Map<ResourceLocation, ResourceLocation>> variants) {
+                                              ResourceLocation id, List<Map<ResourceLocation, ResourceLocation>> variants,
+                                              Map<NodeModel, RigPatch.Weigher> weighers) {
         GltfPaletteLayout layout = GltfPaletteLayout.of(gltf);
 
         List<Primitive> primitives = new ArrayList<>();
         for (SceneModel scene : gltf.getSceneModels()) {
             for (NodeModel root : scene.getNodeModels()) {
-                collectPrimitives(root, layout, primitives);
+                collectPrimitives(root, layout, weighers, primitives);
             }
         }
 
@@ -316,11 +356,20 @@ public final class GltfImporter {
 
     /** Node-name prefixes of consumer-side data (hit volumes, attach markers): never drawn, subtree included. */
     public static final List<String> HIDDEN_PREFIXES = List.of("hit_", "socket_");
+    /** Node {@code extras.gemrenderHidden: true}: same as a hidden prefix. */
+    public static final String HIDDEN = "gemrenderHidden";
 
-    private static void collectPrimitives(NodeModel node, GltfPaletteLayout layout, List<Primitive> out) {
+    private static void collectPrimitives(NodeModel node, GltfPaletteLayout layout,
+                                          Map<NodeModel, RigPatch.Weigher> weighers, List<Primitive> out) {
         if (node.getName() != null) {
             String name = node.getName().toLowerCase(java.util.Locale.ROOT);
             if (HIDDEN_PREFIXES.stream().anyMatch(name::startsWith)) {
+                return;
+            }
+        }
+        if (node.getExtras() != null) {
+            JsonElement hidden = GSON.toJsonTree(node.getExtras()).getAsJsonObject().get(HIDDEN);
+            if (hidden != null && hidden.getAsBoolean()) {
                 return;
             }
         }
@@ -337,14 +386,14 @@ public final class GltfImporter {
                         .getCount();
 
                 MaterialMaps maps = maps(primitive.getMaterialModel());
-                out.add(new Primitive(node, mesh, primitive, skinning(node, primitive, layout),
+                out.add(new Primitive(node, mesh, primitive, skinning(node, primitive, layout, weighers.get(node)),
                         material(primitive.getMaterialModel(), maps), maps, uvInUnitSquare(primitive),
                         MorphTargets.of(primitive, vertexCount), slot(primitive.getMaterialModel())));
             }
         }
 
         for (NodeModel child : node.getChildren()) {
-            collectPrimitives(child, layout, out);
+            collectPrimitives(child, layout, weighers, out);
         }
     }
 
@@ -413,7 +462,7 @@ public final class GltfImporter {
     }
 
     private static VertexSkinning skinning(NodeModel node, MeshPrimitiveModel primitive,
-                                           GltfPaletteLayout layout) {
+                                           GltfPaletteLayout layout, RigPatch.Weigher weigher) {
         int vertexCount = primitive.getAttributes()
                 .get("POSITION")
                 .getCount();
@@ -428,7 +477,28 @@ public final class GltfImporter {
                     + "binding it rigidly to the node instead.", node.getName());
         }
 
+        if (weigher != null) {
+            return weighed(primitive, vertexCount, layout, weigher);
+        }
         return VertexSkinning.rigid(vertexCount, layout.nodeSlot(node));
+    }
+
+    private static VertexSkinning weighed(MeshPrimitiveModel primitive, int vertexCount, GltfPaletteLayout layout,
+                                          RigPatch.Weigher weigher) {
+        AccessorFloatData pos = AccessorDatas.createFloat(primitive.getAttributes().get("POSITION"));
+        int[] slots = new int[vertexCount * 4];
+        float[] weights = new float[vertexCount * 4];
+        NodeModel[] joints = new NodeModel[4];
+        float[] w = new float[4];
+        for (int v = 0; v < vertexCount; v++) {
+            java.util.Arrays.fill(w, 0);
+            int n = weigher.weigh(pos.get(v, 0), pos.get(v, 1), pos.get(v, 2), joints, w);
+            for (int i = 0; i < 4; i++) {
+                slots[v * 4 + i] = layout.nodeSlot(joints[i < n ? i : 0]);
+                weights[v * 4 + i] = i < n ? w[i] : 0;
+            }
+        }
+        return VertexSkinning.weighted(vertexCount, slots, weights);
     }
 
     private static GltfMaterial material(MaterialModel materialModel, MaterialMaps maps) {

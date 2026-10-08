@@ -37,9 +37,15 @@ public final class ParticleModels {
     private static final Map<GemRenderGltfModel, Map<Matrix4fc, Model>> RIGID =
             Collections.synchronizedMap(new WeakHashMap<>());
 
+    public static final MaterialShaders GLOW_SHADERS = new SimpleMaterialShaders(
+            Ids.of("flywheel", "material/default.vert"),
+            Ids.of(GemRender.MOD_ID, "material/absorbance_glow.frag"));
+
     static {
         Absorbance.getInstance()
                 .register(ABSORBANCE_SHADERS);
+        Absorbance.getInstance()
+                .register(GLOW_SHADERS, true);
     }
 
     private ParticleModels() {
@@ -66,16 +72,34 @@ public final class ParticleModels {
         return billboard(texture, Transparency.ORDER_INDEPENDENT);
     }
 
+    /**
+     * Smoke, steam, dust, foam: {@code tau = -ln(1 - a)} summed per pixel, one pass when no wavelet draw shares
+     * the frame. Divergence from {@link #translucent}: colour = tau-weighted mean per pixel, not layer-ordered.
+     */
     public static Model absorbance(ResourceLocation texture) {
+        return absorbance(texture, ABSORBANCE_SHADERS);
+    }
+
+    /**
+     * {@link #absorbance} plus emission (fire, flash, sparks, exhaust): {@code tau = -ln(1 - a (1 - heat))},
+     * emission {@code rgb a heat}, heat from {@link ParticleStyle.Builder#glow}; not lightmapped. Extra RGBA16F
+     * target written per fragment: smoke without glow belongs on {@link #absorbance}.
+     */
+    public static Model glowing(ResourceLocation texture) {
+        return absorbance(texture, GLOW_SHADERS);
+    }
+
+    private static Model absorbance(ResourceLocation texture, MaterialShaders shaders) {
         return BILLBOARDS.computeIfAbsent(
-                new Key(ParticleQuad.INSTANCE, texture, Transparency.ORDER_INDEPENDENT, CutoutShaders.EPSILON,
-                        ABSORBANCE_SHADERS),
+                new Key(ParticleQuad.INSTANCE, texture, Transparency.ORDER_INDEPENDENT, CutoutShaders.OFF,
+                        shaders),
                 key -> new SingleMeshModel(key.mesh(), SimpleMaterial.builder()
                         .texture(key.texture())
                         .transparency(key.transparency())
                         .cutout(key.cutout())
                         .shaders(key.shaders())
                         .writeMask(WriteMask.COLOR)
+                        .useOverlay(false)
                         .fog(FogShaders.NONE)
                         .blur(true)
                         .backfaceCulling(false)
@@ -193,6 +217,7 @@ public final class ParticleModels {
                 .transparency(transparency)
                 .cutout(cutout)
                 .writeMask(writeMaskFor(transparency))
+                .useOverlay(false)
                 .backfaceCulling(false)
                 .cardinalLightingMode(CardinalLightingMode.OFF)
                 .mipmap(false)

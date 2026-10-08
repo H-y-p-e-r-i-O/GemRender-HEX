@@ -223,6 +223,13 @@ if (project.hasProperty('ropes')) {
     }
 }
 
+['lights': 'lightsweep', 'lightLayout': 'lightlayout', 'lightKind': 'lightkind', 'lightCookie': 'lightcookie',
+ 'lightStep': 'lightstep', 'lightShadow': 'lightshadow', 'lightFillBudget': 'lightfillbudget'].each { flag, prop ->
+    if (project.hasProperty(flag)) {
+        props.put "gemrender.${prop}", project.property(flag).toString()
+    }
+}
+
 if (project.hasProperty('radar')) {
     props.put 'gemrender.autoradar', project.property('radar').toString()
 }

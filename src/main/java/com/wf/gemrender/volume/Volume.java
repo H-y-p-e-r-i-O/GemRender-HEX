@@ -19,6 +19,8 @@ public final class Volume {
 
     private boolean closed;
 
+    private boolean hidden;
+
     private Volume(int slot, VolumeStyle style) {
         this.slot = slot;
         this.style = style;
@@ -71,6 +73,27 @@ public final class Volume {
         return field;
     }
 
+    public VolumeStyle style() {
+        return style;
+    }
+
+    public float fade() {
+        return fade;
+    }
+
+    public float minExtent() {
+        return Math.min(extentX, Math.min(extentY, extentZ));
+    }
+
+    /** Hidden: drawn with fade 0, {@link #fade()} kept ({@link com.wf.gemrender.medium.CameraMedium}). */
+    public Volume hidden(boolean value) {
+        if (hidden != value) {
+            hidden = value;
+            flush();
+        }
+        return this;
+    }
+
     public void close() {
         if (closed) {
             return;
@@ -94,7 +117,7 @@ public final class Volume {
         VolumeField current = field;
 
         VolumeBuffer.getInstance()
-                .write(slot, style, extentX, extentY, extentZ, fade, seed,
+                .write(slot, style, extentX, extentY, extentZ, hidden ? 0.0f : fade, seed,
                         current == null ? 0.0f : atlas.originU(current.tile()),
                         current == null ? 0.0f : atlas.originV(current.tile()),
                         current == null ? 0.0f : atlas.originW(current.tile()),
