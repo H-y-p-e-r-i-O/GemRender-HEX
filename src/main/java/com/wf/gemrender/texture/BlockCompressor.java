@@ -3,16 +3,12 @@ package com.wf.gemrender.texture;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-//? if ktx {
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
-import org.lwjgl.util.ktx.KTX;
 import org.lwjgl.util.ktx.ktxBasisParams;
-import org.lwjgl.util.ktx.ktxTexture;
 import org.lwjgl.util.ktx.ktxTexture2;
 import org.lwjgl.util.ktx.ktxTextureCreateInfo;
-//?}
 
 public final class BlockCompressor {
     public static final int BLOCK = 4;
@@ -30,7 +26,6 @@ public final class BlockCompressor {
         return ceilBlocks(width) * ceilBlocks(height) * BYTES_PER_BLOCK;
     }
 
-    //? if ktx {
     public static Blocks toBc7(int width, int height, byte[] rgba) throws IOException {
         if (width <= 0 || height <= 0) {
             throw new IOException("cannot compress a " + width + "x" + height + " image");
@@ -56,16 +51,16 @@ public final class BlockCompressor {
 
             PointerBuffer handle = stack.mallocPointer(1);
 
-            int created = KTX.ktxTexture2_Create(info, KTX.KTX_TEXTURE_CREATE_ALLOC_STORAGE, handle);
-            if (created != KTX.KTX_SUCCESS) {
-                throw new IOException("could not create a KTX2 texture: " + KTX.ktxErrorString(created));
+            int created = Libktx.create(info, Libktx.TEXTURE_CREATE_ALLOC_STORAGE, handle);
+            if (created != Libktx.SUCCESS) {
+                throw new IOException("could not create a KTX2 texture: " + Libktx.errorString(created));
             }
 
             long address = handle.get(0);
             try {
                 return encode(address, width, height, rgba, stack);
             } finally {
-                KTX.ktxTexture_Destroy(ktxTexture.create(address));
+                Libktx.destroy(address);
             }
         }
     }
@@ -76,10 +71,10 @@ public final class BlockCompressor {
         try {
             pixels.put(rgba)
                     .flip();
-            int set = KTX.ktxTexture_SetImageFromMemory(ktxTexture.create(address), 0, 0, 0, pixels);
-            if (set != KTX.KTX_SUCCESS) {
+            int set = Libktx.setImageFromMemory(address, pixels);
+            if (set != Libktx.SUCCESS) {
                 throw new IOException("could not load pixels into a KTX2 texture: "
-                        + KTX.ktxErrorString(set));
+                        + Libktx.errorString(set));
             }
         } finally {
             MemoryUtil.memFree(pixels);
@@ -90,29 +85,29 @@ public final class BlockCompressor {
         ktxBasisParams params = ktxBasisParams.calloc(stack)
                 .structSize(ktxBasisParams.SIZEOF)
                 .uastc(true)
-                .uastcFlags(KTX.KTX_PACK_UASTC_LEVEL_FASTEST)
+                .uastcFlags(Libktx.PACK_UASTC_LEVEL_FASTEST)
                 .threadCount(Math.max(1, Runtime.getRuntime()
                         .availableProcessors() / 2));
 
-        int compressed = KTX.ktxTexture2_CompressBasisEx(texture, params);
-        if (compressed != KTX.KTX_SUCCESS) {
-            throw new IOException("Basis encode failed: " + KTX.ktxErrorString(compressed));
+        int compressed = Libktx.compressBasisEx(texture, params);
+        if (compressed != Libktx.SUCCESS) {
+            throw new IOException("Basis encode failed: " + Libktx.errorString(compressed));
         }
 
-        int transcoded = KTX.ktxTexture2_TranscodeBasis(texture, KTX.KTX_TTF_BC7_RGBA, 0);
-        if (transcoded != KTX.KTX_SUCCESS) {
-            throw new IOException("could not transcode to BC7: " + KTX.ktxErrorString(transcoded));
+        int transcoded = Libktx.transcodeBasis(texture, Libktx.TTF_BC7_RGBA, 0);
+        if (transcoded != Libktx.SUCCESS) {
+            throw new IOException("could not transcode to BC7: " + Libktx.errorString(transcoded));
         }
 
         PointerBuffer pOffset = stack.mallocPointer(1);
-        int found = KTX.ktxTexture_GetImageOffset(ktxTexture.create(address), 0, 0, 0, pOffset);
-        if (found != KTX.KTX_SUCCESS) {
-            throw new IOException("encoded KTX2 has no level 0: " + KTX.ktxErrorString(found));
+        int found = Libktx.imageOffset(address, pOffset);
+        if (found != Libktx.SUCCESS) {
+            throw new IOException("encoded KTX2 has no level 0: " + Libktx.errorString(found));
         }
         long offset = pOffset.get(0);
 
         int size = blockBytes(width, height);
-        ByteBuffer data = KTX.ktxTexture_GetData(ktxTexture.create(address));
+        ByteBuffer data = Libktx.data(texture);
         if (data == null || data.capacity() < offset + size) {
             throw new IOException("encoded KTX2 is shorter than the " + size + " bytes BC7 needs for "
                     + width + "x" + height);
@@ -124,11 +119,6 @@ public final class BlockCompressor {
         return new Blocks(width, height, GL_COMPRESSED_RGBA_BPTC_UNORM, blocks);
     }
 
-    //?} else {
-    /*public static Blocks toBc7(int width, int height, byte[] rgba) throws IOException {
-        throw new UnsupportedOperationException("BC7 compression needs org.lwjgl:lwjgl-ktx, which has no build for the LWJGL version this Minecraft version ships (see versions/<version>/gradle.properties, ktx_supported)");
-    }
-*///?}
     private static int ceilBlocks(int pixels) {
         return (pixels + BLOCK - 1) / BLOCK;
     }

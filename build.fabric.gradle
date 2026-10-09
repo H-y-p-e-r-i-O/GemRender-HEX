@@ -32,16 +32,15 @@ stonecutter.constants.match(loader, 'forge', 'neoforge', 'fabric')
 // Minecraft actually uses -- the ModDevGradle nodes resolve it on their own -- so pin to it.
 configurations.configureEach {
     resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'org.lwjgl') {
+        // lwjgl-ktx exempt: ktx_version, no 3.3.1 build exists.
+        if (details.requested.group == 'org.lwjgl' && details.requested.name != 'lwjgl-ktx') {
             details.useVersion lwjgl_version
         }
     }
 }
 
-def ktxSupported = ktx_supported.toBoolean()
 def ktxPlatforms = ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']
 
-stonecutter.constants.put('ktx', ktxSupported)
 stonecutter.constants.put('iris', iris_supported.toBoolean())
 stonecutter.constants.put('water', water_supported.toBoolean())
 stonecutter.constants.put('lights', lights_supported.toBoolean())
@@ -145,15 +144,14 @@ dependencies {
     // wraps a plain library in generated mod metadata on the way in. Only the ktx module is named --
     // LWJGL's core is already on Minecraft's own runtime classpath, and asking for a second copy of
     // it is how you get two Library instances fighting over the same natives directory.
-    if (ktxSupported) {
-        compileOnly("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
-        runtimeOnly("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
-        include("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
+    // ktx_version may exceed lwjgl_version: struct classes + natives only; calls via Libktx (libffi).
+    compileOnly("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
+    runtimeOnly("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
+    include("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
 
-        for (platform in ktxPlatforms) {
-            runtimeOnly("org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
-            include("org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
-        }
+    for (platform in ktxPlatforms) {
+        runtimeOnly("org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
+        include("org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
     }
 }
 
@@ -167,37 +165,23 @@ sourceSets {
     }
 }
 
-if (!ktxSupported) {
-    sourceSets.ktxTest.java.setSrcDirs([])
-    sourceSets.ktxTest.resources.setSrcDirs([])
-}
-
 dependencies {
-    if (ktxSupported) {
-        ktxTestImplementation platform('org.junit:junit-bom:5.11.3')
-        ktxTestImplementation 'org.junit.jupiter:junit-jupiter'
-        ktxTestImplementation 'org.assertj:assertj-core:3.26.3'
-        ktxTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-        ktxTestImplementation "org.lwjgl:lwjgl:${lwjgl_version}"
-        ktxTestImplementation("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
+    ktxTestImplementation platform('org.junit:junit-bom:5.11.3')
+    ktxTestImplementation 'org.junit.jupiter:junit-jupiter'
+    ktxTestImplementation 'org.assertj:assertj-core:3.26.3'
+    ktxTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    ktxTestImplementation "org.lwjgl:lwjgl:${lwjgl_version}"
+    ktxTestImplementation("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
 
-        for (platform in ktxPlatforms) {
-            ktxTestRuntimeOnly "org.lwjgl:lwjgl:${lwjgl_version}:${platform}"
-            ktxTestRuntimeOnly("org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
-        }
+    for (platform in ktxPlatforms) {
+        ktxTestRuntimeOnly "org.lwjgl:lwjgl:${lwjgl_version}:${platform}"
+        ktxTestRuntimeOnly("org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
     }
 }
 
 tasks.register('ktxTest', Test) {
     group = 'verification'
     description = 'KTX2 decoding, against files encoded by the same library in the same process.'
-    onlyIf {
-        if (!ktxSupported) {
-            logger.lifecycle "ktxTest: KTX2 is unsupported on ${stonecutter.current.version}, skipping."
-            return false
-        }
-        return true
-    }
     testClassesDirs = sourceSets.ktxTest.output.classesDirs
     classpath = sourceSets.ktxTest.runtimeClasspath
     useJUnitPlatform()
@@ -207,9 +191,7 @@ tasks.register('ktxTest', Test) {
     }
 }
 
-if (ktxSupported) {
-    tasks.named('check') { dependsOn tasks.named('ktxTest') }
-}
+tasks.named('check') { dependsOn tasks.named('ktxTest') }
 
 // fabric.mod.json is generated rather than filtered in place. Loom scans every resources srcDir for
 // one and parses what it finds, and the template is not valid JSON until the mixin list is expanded
@@ -395,6 +377,7 @@ if (!lights_supported.toBoolean()) {
     sourceSets.main.java.exclude 'com/wf/gemrender/light/**'
     sourceSets.main.java.exclude 'com/wf/gemrender/mixin/light/**'
     sourceSets.main.resources.exclude 'gemrender.light.mixins.json'
+    sourceSets.test.java.exclude 'com/wf/gemrender/light/**'
     sourceSets.harness.java.exclude 'com/wf/gemrender/spike/LightSpike.java'
 }
 
@@ -481,6 +464,7 @@ fabricMetadata.configure {
     def tokens = [
             'mod_id'                 : mod_id,
             'mod_version'            : mod_version,
+            'mod_license'            : mod_license,
             'minecraft_version_range': minecraft_version_range,
             'java_version'           : java_version,
             'flywheel_version_range' : flywheel_fabric_version_range,

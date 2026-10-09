@@ -4,15 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.lwjgl.util.ktx.KTX;
 
 class KtxNativeSmokeTest {
 	@Test
-	@DisplayName("libktx links, and its transcode format table is the one the docs describe")
+	@DisplayName("libktx links through libffi on this node's LWJGL core")
 	void theNativeLoads() {
-		assertThat(KTX.ktxTranscodeFormatString(KTX.KTX_TTF_RGBA32)).isNotBlank();
-
-		assertThat(KTX.KTX_TTF_RGBA32).isEqualTo(13);
-		assertThat(KTX.KTX_TTF_BC7_RGBA).isEqualTo(6);
+		assertThat(Libktx.errorString(Libktx.SUCCESS)).isNotBlank();
 	}
 }

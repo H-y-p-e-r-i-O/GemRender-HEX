@@ -7,14 +7,18 @@ import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.libc.LibCStdlib;
-import org.lwjgl.util.ktx.KTX;
 import org.lwjgl.util.ktx.ktxBasisParams;
-import org.lwjgl.util.ktx.ktxTexture;
 import org.lwjgl.util.ktx.ktxTexture2;
 import org.lwjgl.util.ktx.ktxTextureCreateInfo;
 
+import static org.lwjgl.system.libffi.LibFFI.ffi_type_pointer;
+import static org.lwjgl.system.libffi.LibFFI.ffi_type_sint32;
+
 public final class KtxEncoder {
 	private static final int VK_FORMAT_R8G8B8A8_UNORM = 37;
+	private static final int PACK_UASTC_LEVEL_VERYSLOW = 4;
+	private static final Libktx.Function WRITE_TO_MEMORY = new Libktx.Function("ktxTexture2_WriteToMemory",
+			ffi_type_sint32, ffi_type_pointer, ffi_type_pointer, ffi_type_pointer);
 
 	private KtxEncoder() {
 	}
@@ -43,30 +47,28 @@ public final class KtxEncoder {
 					.generateMipmaps(false);
 
 			PointerBuffer handle = stack.mallocPointer(1);
-			check(KTX.ktxTexture2_Create(info, KTX.KTX_TEXTURE_CREATE_ALLOC_STORAGE, handle),
-					"create");
+			check(Libktx.create(info, Libktx.TEXTURE_CREATE_ALLOC_STORAGE, handle), "create");
 
 			long address = handle.get(0);
 			ktxTexture2 texture = ktxTexture2.create(address);
-			ktxTexture base = ktxTexture.create(address);
 			try {
-				check(KTX.ktxTexture_SetImageFromMemory(base, 0, 0, 0, pixels), "set image");
+				check(Libktx.setImageFromMemory(address, pixels), "set image");
 
 				ktxBasisParams params = ktxBasisParams.calloc(stack)
 						.structSize(ktxBasisParams.SIZEOF)
 						.uastc(uastc)
 						.threadCount(1);
 				if (uastc) {
-					params.uastcFlags(KTX.KTX_PACK_UASTC_LEVEL_VERYSLOW);
+					params.uastcFlags(PACK_UASTC_LEVEL_VERYSLOW);
 				} else {
-					params.compressionLevel(KTX.KTX_ETC1S_DEFAULT_COMPRESSION_LEVEL)
+					params.compressionLevel(MemoryUtil.memGetInt(Libktx.symbol("KTX_ETC1S_DEFAULT_COMPRESSION_LEVEL")))
 							.qualityLevel(255);
 				}
-				check(KTX.ktxTexture2_CompressBasisEx(texture, params), "compress");
+				check(Libktx.compressBasisEx(texture, params), "compress");
 
 				PointerBuffer out = stack.mallocPointer(1);
 				PointerBuffer size = stack.mallocPointer(1);
-				check(KTX.ktxTexture_WriteToMemory(base, out, size), "write");
+				check((int) WRITE_TO_MEMORY.call(address, out.address(), size.address()), "write");
 
 				int length = (int) size.get(0);
 				byte[] bytes = new byte[length];
@@ -76,7 +78,7 @@ public final class KtxEncoder {
 				LibCStdlib.nfree(out.get(0));
 				return bytes;
 			} finally {
-				KTX.ktxTexture_Destroy(base);
+				Libktx.destroy(address);
 			}
 		} finally {
 			MemoryUtil.memFree(pixels);
@@ -84,8 +86,8 @@ public final class KtxEncoder {
 	}
 
 	private static void check(int result, String what) throws IOException {
-		if (result != KTX.KTX_SUCCESS) {
-			throw new IOException("libktx could not " + what + ": " + KTX.ktxErrorString(result));
+		if (result != Libktx.SUCCESS) {
+			throw new IOException("libktx could not " + what + ": " + Libktx.errorString(result));
 		}
 	}
 }

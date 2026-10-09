@@ -4,7 +4,7 @@
   "version": "${mod_version}",
   "name": "GemRender",
   "description": "A GPU-driven model and animation renderer for Minecraft.",
-  "license": "MIT",
+  "license": "${mod_license}",
   "environment": "client",
   "entrypoints": {
     "client": [

@@ -11,6 +11,13 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 
+//? if >=26.1 {
+/*import com.mojang.blaze3d.opengl.GlTexture;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.TextureFormat;
+*///?}
+
 public final class CompressedTexture extends AbstractTexture {
     private final int width;
     private final int height;
@@ -43,11 +50,16 @@ public final class CompressedTexture extends AbstractTexture {
         }
 
         //? if >=26.1 {
-		/*throw new UnsupportedOperationException(
-				"BC7 atlases have no 26.1 path: a GpuTexture has no GL name to upload blocks into and "
-						+ "TextureFormat has no compressed member. Unreachable while ktx_supported is "
-						+ "false, which is what produces the blocks in the first place.");
-*///?} else {
+        /*// Declared RGBA8, stored BC7: GlDevice allocates with glTexImage2D (mutable) => level 0 respecified.
+        // Sampling is format-agnostic; nothing copies into or out of this texture.
+        texture = RenderSystem.getDevice().createTexture(() -> "gemrender:bc7_atlas", GpuTexture.USAGE_TEXTURE_BINDING,
+                TextureFormat.RGBA8, width, height, 1, 1);
+        GlStateManager._bindTexture(((GlTexture) texture).glId());
+        compressedImage();
+        sampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+        textureView = RenderSystem.getDevice().createTextureView(texture);
+        blocks = null;
+        *///?} else {
         GlStateManager._bindTexture(getId());
 
         GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
@@ -57,6 +69,15 @@ public final class CompressedTexture extends AbstractTexture {
         GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
         GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
 
+        compressedImage();
+
+        blur = false;
+        mipmap = false;
+        blocks = null;
+        //?}
+    }
+
+    private void compressedImage() {
         ByteBuffer data = MemoryUtil.memAlloc(blocks.length);
         try {
             data.put(blocks)
@@ -65,11 +86,6 @@ public final class CompressedTexture extends AbstractTexture {
         } finally {
             MemoryUtil.memFree(data);
         }
-
-        blur = false;
-        mipmap = false;
-        blocks = null;
-        //?}
     }
 
     //? if <26.1 {

@@ -44,7 +44,6 @@ def repoRoot = rootProject.projectDir
 def runDir = rootProject.file(
         project.hasProperty('runDir') ? project.property('runDir').toString() : run_dir)
 
-def ktxSupported = ktx_supported.toBoolean()
 def irisSupported = iris_supported.toBoolean()
 
 // Iris and Sodium ship under different names on Forge: Oculus is the Iris port and Embeddium the
@@ -68,7 +67,6 @@ def directMixinConfig = "gemrender.${directMixinSet}.mixins.json"
 
 stonecutter.constants.match(loader, 'forge', 'neoforge', 'fabric')
 
-stonecutter.constants.put('ktx', ktxSupported)
 stonecutter.constants.put('iris', irisSupported)
 stonecutter.constants.put('water', waterSupported)
 stonecutter.constants.put('direct', directSupported)
@@ -256,11 +254,6 @@ sourceSets {
     }
 }
 
-if (!ktxSupported) {
-    sourceSets.ktxTest.java.setSrcDirs([])
-    sourceSets.ktxTest.resources.setSrcDirs([])
-}
-
 sourceSets {
     main {
         resources {
@@ -317,6 +310,7 @@ if (!lightsSupported) {
     sourceSets.main.java.exclude 'com/wf/gemrender/light/**'
     sourceSets.main.java.exclude 'com/wf/gemrender/mixin/light/**'
     sourceSets.main.resources.exclude 'gemrender.light.mixins.json'
+    sourceSets.test.java.exclude 'com/wf/gemrender/light/**'
     sourceSets.harness.java.exclude 'com/wf/gemrender/spike/LightSpike.java'
 }
 
@@ -434,17 +428,16 @@ dependencies {
         }
     }
 
-    if (ktxSupported) {
-        compileOnly("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
+    // ktx_version may exceed lwjgl_version: struct classes + natives only; calls via Libktx (libffi).
+    compileOnly("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
 
-        def ktxRuntime = stonecutter.eval(mcVersion, '>=26.1') ? 'runtimeOnly' : 'additionalRuntimeClasspath'
-        add(ktxRuntime, "org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
-        jarJar("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
+    def ktxRuntime = stonecutter.eval(mcVersion, '>=26.1') ? 'runtimeOnly' : 'additionalRuntimeClasspath'
+    add(ktxRuntime, "org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
+    jarJar("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
 
-        for (platform in ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']) {
-            add(ktxRuntime, "org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
-            jarJar("org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
-        }
+    for (platform in ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']) {
+        add(ktxRuntime, "org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
+        jarJar("org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
     }
 
     if (project.findProperty('sodium_standalone_version')) {
@@ -520,17 +513,15 @@ dependencies {
         add(modConf('testImplementation'), flywheelDep)
     }
 
-    if (ktxSupported) {
-        ktxTestImplementation platform('org.junit:junit-bom:5.11.3')
-        ktxTestImplementation 'org.junit.jupiter:junit-jupiter'
-        ktxTestImplementation 'org.assertj:assertj-core:3.26.3'
-        ktxTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-        ktxTestImplementation "org.lwjgl:lwjgl:${lwjgl_version}"
-        ktxTestImplementation("org.lwjgl:lwjgl-ktx:${lwjgl_version}") { transitive = false }
-        for (platform in ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']) {
-            ktxTestRuntimeOnly "org.lwjgl:lwjgl:${lwjgl_version}:${platform}"
-            ktxTestRuntimeOnly("org.lwjgl:lwjgl-ktx:${lwjgl_version}:${platform}") { transitive = false }
-        }
+    ktxTestImplementation platform('org.junit:junit-bom:5.11.3')
+    ktxTestImplementation 'org.junit.jupiter:junit-jupiter'
+    ktxTestImplementation 'org.assertj:assertj-core:3.26.3'
+    ktxTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    ktxTestImplementation "org.lwjgl:lwjgl:${lwjgl_version}"
+    ktxTestImplementation("org.lwjgl:lwjgl-ktx:${ktx_version}") { transitive = false }
+    for (platform in ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']) {
+        ktxTestRuntimeOnly "org.lwjgl:lwjgl:${lwjgl_version}:${platform}"
+        ktxTestRuntimeOnly("org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
     }
 
     testImplementation platform('org.junit:junit-bom:5.11.3')
@@ -569,13 +560,6 @@ tasks.named('test', Test) {
 tasks.register('ktxTest', Test) {
     group = 'verification'
     description = 'KTX2 decoding, against files encoded by the same library in the same process.'
-    onlyIf {
-        if (!ktxSupported) {
-            logger.lifecycle "ktxTest: KTX2 is unsupported on ${stonecutter.current.version}, skipping."
-            return false
-        }
-        return true
-    }
     testClassesDirs = sourceSets.ktxTest.output.classesDirs
     classpath = sourceSets.ktxTest.runtimeClasspath
     useJUnitPlatform()
@@ -584,9 +568,7 @@ tasks.register('ktxTest', Test) {
         exceptionFormat = 'full'
     }
 }
-if (ktxSupported) {
-    tasks.named('check') { dependsOn tasks.named('ktxTest') }
-}
+tasks.named('check') { dependsOn tasks.named('ktxTest') }
 
 def glslValidator = new File(internalDir, 'scripts/validate-glsl.sh')
 tasks.register('validateGlsl', Exec) {
@@ -657,13 +639,6 @@ afterEvaluate {
 tasks.register('makeKtxAssets', JavaExec) {
     group = 'build'
     description = 'Regenerates the .ktx2 test textures from the PNGs beside them.'
-    onlyIf {
-        if (!ktxSupported) {
-            logger.lifecycle "makeKtxAssets: KTX2 is unsupported on ${stonecutter.current.version}, skipping."
-            return false
-        }
-        return true
-    }
     classpath = sourceSets.ktxTest.runtimeClasspath
 
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(java_version as int) }

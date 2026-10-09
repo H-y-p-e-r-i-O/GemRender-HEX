@@ -7,23 +7,21 @@ This is the consumer-facing guide, and it is self-contained: everything you need
 here. Where a rule below looks arbitrary, the reasoning is in the maintainers' notes
 (`gemrender-internal/docs/`), which are kept outside this repository.
 
-GemRender ships for three Minecraft versions, built from one source tree:
+GemRender ships for five targets, built from one source tree:
 
-| Minecraft | Loader | Java |
-|---|---|---|
-| 1.21.1 | NeoForge 21.1.248 | 21 |
-| 1.20.1 | MinecraftForge 47.4.23 | 17 |
-| 26.1 | NeoForge 26.1.2.109 | 25 |
+| Minecraft | Loader | Java | Flywheel |
+|---|---|---|---|
+| 1.21.1 | NeoForge 21.1.248 | 21 | 1.0.6, inside the jar |
+| 1.21.1 | Fabric Loader 0.19.3, Fabric API 0.116.15 | 21 | 1.0.x, install separately |
+| 1.20.1 | MinecraftForge 47.4.23 | 17 | 1.0.6-281, inside the jar |
+| 1.20.1 | Fabric Loader 0.19.3, Fabric API 0.92.2 | 17 | 1.0.x, install separately |
+| 26.1.2 | NeoForge 26.1.2.109 | 25 | 1.0.7 fork, provided by the jar |
 
-Flywheel rides inside GemRender's jar -- 1.0.6 before 26.1, a port of it on 26.1 -- so there is
-nothing else to install. On 26.1 that also means a Flywheel of your own in `mods/` is a duplicate mod
-id and a hard load failure. Everything here is client side.
+A Flywheel in `mods/` displaces the bundled copy; on 26.1 it is a duplicate mod id and fails to load. Everything here is client side.
 
-**The API is the same on all three**, and that is a checked claim rather than an intention: the public
-signatures of every type below are identical across the three built jars except at two seams, both of
-them vanilla's doing -- how an item claims a renderer and how armour does. Those are in
-[section 6](#6-items-armour-and-the-hand), beside the code that differs, and
-[Version differences](#version-differences) is the complete list.
+**Same public API on every target** except two seams, both vanilla's: how an item claims a renderer and
+how armour does (26.1). Checked by signature diff of the NeoForge/Forge jars; Fabric jars not yet diffed.
+Seams in [section 6](#6-items-armour-and-the-hand); complete list in [Version differences](#version-differences).
 
 ---
 
@@ -2052,7 +2050,7 @@ there is nothing to overlay onto.
 ### Version differences
 
 The complete list, read off the three built jars rather than remembered. Everything not named here has
-the same public signature on 1.21.1, 1.20.1 and 26.1 -- every type in the table above, the whole of
+the same public signature on 1.21.1, 1.20.1 and 26.1 (NeoForge/Forge jars), every type in the table above, the whole of
 sections 1 to 5 and 7, and the two appearance interfaces in section 6.
 
 | | 1.20.1 and 1.21.1 | 26.1 |
@@ -2064,13 +2062,11 @@ sections 1 to 5 and 7, and the two appearance interfaces in section 6.
 | `ArmorAppearance`'s `entity` | the wearer | `null` -- see section 6 |
 | A model that overflows its item cell in the GUI | overflows the slot | is clipped, unless the client item JSON says `"oversized_in_gui": true` |
 
-Three capabilities are absent on a version rather than different, and none of them is API:
+Capabilities absent on a target rather than different; none is API:
 
-- **Iris/shader-pack support is 1.21.1 only.** `iris-flw-compat` is pinned to one Sodium and Iris pair
-  for that version; there is no 1.20.1 or 26.1 equivalent to bind against.
-- **KTX2/BC7 model textures need LWJGL 3.3.2.** 1.20.1 ships 3.3.1, so the feature is compiled out
-  there and model textures fall back to PNG. On 26.1 the atlas is compressed but the upload has no
-  path yet, so a model whose sheet gets compressed renders as the missing texture -- keep assets under
-  the compression threshold on 26.1 for now.
-- **The water split, and with it the cloud half, is off on 26.1.** Translucent models there occlude
-  the vanilla translucent surfaces behind them, as they did everywhere before the split.
+- **Iris/shader packs**: 1.21.1 (both loaders) and 1.20.1 Fabric (through Colorwheel). None on 1.20.1
+  Forge or 26.1.
+- **Lights** ([section 9](#9-lights)): 1.21.1 NeoForge only.
+- **Water split, and with it the cloud half, opt-in on 26.1** (`-Dgemrender.watersplit=force`,
+  `-Dgemrender.cloudsplit=force`): on, OIT composites on the wrong side of water. Off, translucent
+  models occlude the vanilla translucent surfaces behind them.
