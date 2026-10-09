@@ -107,7 +107,7 @@ public final class LightFrame {
         }
 
         Vec3 eye = camera.getPosition();
-        frustum.set(viewProjection.set(projection).mul(view), false);
+        frustum.set(viewProjection.set(projection).mul(view));
         if (visible.length < collected) {
             visible = new Light[pool.size()];
         }
