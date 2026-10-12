@@ -753,11 +753,18 @@ publishing {
     publications {
         register('mavenJava', MavenPublication) {
             from components.java
+            artifactId = "gemrender-${project.name}"
+            version = "${project.version}-SNAPSHOT"
         }
     }
     repositories {
         maven {
-            url "file://${project.projectDir}/mcmodsrepo"
+            name = 'WarfactorySnapshots'
+            url = 'https://repo.warfactory.co/snapshots'
+            credentials {
+                username = project.findProperty('warfactoryUser') ?: System.getenv('WARFACTORY_MAVEN_USER')
+                password = project.findProperty('warfactoryToken') ?: System.getenv('WARFACTORY_MAVEN_TOKEN')
+            }
         }
     }
 }
