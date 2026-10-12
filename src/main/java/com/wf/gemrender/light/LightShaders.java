@@ -31,13 +31,16 @@ public final class LightShaders {
             "rendertype_entity_no_outline", "rendertype_entity_decal", "rendertype_item_entity_translucent_cull",
             "rendertype_armor_cutout_no_cull", "particle");
 
+    /**
+     * Lightmap call head; whole call wrapped through its matching paren. Arguments vary: Veil reprint
+     * {@code texelFetch(Sampler2, (UV2 / 16), 0)}, Sable {@code minecraft_sample_lightmap(Sampler2, ivec2((UV2 * ...)))}.
+     */
     private static final Pattern VANILLA_LIGHTMAP = Pattern.compile(
-            "minecraft_sample_lightmap\\(Sampler2, UV2\\)|texelFetch\\(Sampler2, UV2 / 16, 0\\)");
+            "\\b(?:minecraft_sample_lightmap|texelFetch)\\(\\s*Sampler2\\s*,");
     private static final Pattern VANILLA_FOG = Pattern.compile("fragColor = linear_fog\\(color,");
     private static final Pattern MAIN = Pattern.compile("void main\\(\\) \\{");
 
-    private static final Pattern SODIUM_LIGHTMAP = Pattern.compile(
-            "texture\\(u_LightTex, _vert_tex_light_coord\\)");
+    private static final Pattern SODIUM_LIGHTMAP = Pattern.compile("\\btexture\\(\\s*u_LightTex\\s*,");
     private static final Pattern SODIUM_POSITION = Pattern.compile(
             "vec3 position = _vert_position \\+ translation;");
     private static final Pattern SODIUM_FOG = Pattern.compile("fragColor = _linearFog\\((\\w+),");
@@ -102,7 +105,7 @@ public final class LightShaders {
         if (vertex) {
             String position = source.contains("uniform vec3 ChunkOffset;") ? "Position + ChunkOffset" : "Position";
             String normal = source.contains("in vec3 Normal;") ? "Normal" : "vec3(0.0)";
-            String patched = replaceAll(name, source, VANILLA_LIGHTMAP, "_grl_lm($0)");
+            String patched = wrapLightmap(name, source, VANILLA_LIGHTMAP);
             patched = replaceOne(name, patched, MAIN, "void _grl_main() {");
             return afterVersion(name, patched, VERTEX_DECLARATIONS) + "\nvoid main() {\n    _grl_lmColor = vec4(1.0);\n"
                     + "    _grl_main();\n    _grl_pos = " + position + ";\n    _grl_normal = " + normal + ";\n}\n";
@@ -116,7 +119,7 @@ public final class LightShaders {
     public static String sodium(ResourceLocation id, String source) {
         String name = id.toString();
         if (id.equals(SODIUM_VERTEX)) {
-            String patched = replaceAll(name, source, SODIUM_LIGHTMAP, "_grl_lm($0)");
+            String patched = wrapLightmap(name, source, SODIUM_LIGHTMAP);
             patched = replaceOne(name, patched, SODIUM_POSITION, "$0\n    _grl_pos = position;");
             return afterVersion(name, patched, VERTEX_DECLARATIONS);
         }
@@ -188,10 +191,28 @@ public final class LightShaders {
         return anchor.matcher(source).replaceFirst(replacement);
     }
 
-    private static String replaceAll(String name, String source, Pattern anchor, String replacement) {
-        if (!anchor.matcher(source).find()) {
-            throw new IllegalStateException("GemRender lights: " + name + " has no /" + anchor + "/");
+    /** Every call opened by {@code head} -> {@code _grl_lm(call)}. */
+    private static String wrapLightmap(String name, String source, Pattern head) {
+        Matcher matcher = head.matcher(source);
+        StringBuilder out = new StringBuilder(source.length() + 64);
+        int copied = 0;
+        while (matcher.find()) {
+            int end = matcher.end();
+            for (int depth = 1; depth > 0; end++) {
+                if (end == source.length()) {
+                    throw new IllegalStateException("GemRender lights: " + name + " lightmap call unclosed at " + matcher.start());
+                }
+                char c = source.charAt(end);
+                depth += c == '(' ? 1 : c == ')' ? -1 : 0;
+            }
+            out.append(source, copied, matcher.start()).append("_grl_lm(").append(source, matcher.start(), end).append(')');
+            copied = end;
         }
-        return anchor.matcher(source).replaceAll(replacement);
+        if (copied == 0) {
+            throw new IllegalStateException("GemRender lights: " + name + " has no /" + head + "/; lightmap lines: "
+                    + source.lines().filter(l -> l.contains("Sampler2") || l.contains("UV2") || l.contains("lightmap"))
+                    .map(String::strip).toList());
+        }
+        return out.append(source, copied, source.length()).toString();
     }
 }

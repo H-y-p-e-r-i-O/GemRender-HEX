@@ -1951,6 +1951,40 @@ instead, as the example does when the model is null.
 
 ---
 
+## 11. 2D canvas
+
+`com.wf.gemrender.ui`, 1.21.1 NeoForge only (`ui_supported`). Immediate-mode 2D recorder for HUDs, GUI
+panels and texture surfaces; one quad per primitive in a CPU arena, drawn in as few `glDrawElements` as
+texture slots (8 per batch) and clip changes allow. Steady state allocates nothing.
+
+```java
+Canvas c = Canvas.shared().begin(graphics);      // or begin(CanvasTarget, w, h, clearArgb) / begin(fbo, px, py, w, h, topRowFirst)
+c.push().translate(x, y).rotate(rad).scale(s);
+c.fill(...); c.roundRect(...); c.line(x0, y0, x1, y1, width, argb); c.arc(cx, cy, r, thickness, start, sweep, argb);
+c.sprite(texture, x0, y0, x1, y1, u0, v0, u1, v1, argb); c.text(buffer, x, y, argb, shadow);
+c.pop();
+c.end();
+```
+
+| rule | |
+|---|---|
+| units | GUI px of the `GuiGraphics` pose at `begin`; target begins: caller's units over the target |
+| colour | ARGB taken literally: alpha 0 = invisible (vanilla `drawString` treats < 4 as opaque) |
+| angles | radians, 0 = +x, positive = clockwise on screen |
+| AA | `line`, `polyline`, `dashed`, `arc`, `ring`, `disc`, `sector`, `roundRect`/`roundFrame`: edge coverage from screen-space derivatives, 1 px soft under any scale. `fill`, `quad`, `triangle`, `fan`: hard edges |
+| clip | `pushClip` = screen-aligned bounds of the rect (rotated => its bounding box), intersected with the parent and any enclosing vanilla scissor |
+| text | default font glyphs (vanilla atlases), `CharSequence` or `FormattedCharSequence` (style colour, bold, italic; no underline/strikethrough/obfuscation). `width(..)` = `Font.width`. Glyphs sampled sharp-bilinear (4 `texelFetch`): == nearest at integer px/texel, even columns at fractional scale |
+| `TextBuffer` | fixed capacity, never grows, appends past capacity dropped; number/clock/hex formatting without allocation |
+| vanilla in between | `suspend()` draws pending quads and restores GL; vanilla draws (items, entities); `resume()`. `applyTo(pose)` puts the canvas transform on a `PoseStack` |
+| targets | `CanvasTarget`: owned RGBA8 FBO, premultiplied alpha, rows upright for v0 = top. `begin(fbo, ..., topRowFirst = true)`: draw over a camera-rendered framebuffer, no clear |
+| not re-entrant | one `begin`/`end` per instance at a time; `shared()` = render-thread singleton |
+
+Measured (Mesa radeonsi, glthread on): `glGet*` = glthread round trip, 18 per begin cost 31 us => state
+is read from `GlStateManager`'s shadow. `glBufferData` per flush 30 us; persistent map + fences worse
+(fence = sync); `glBufferSubData` into a fixed ring 3 us. 781 vertices / 4 batches: whole HUD pass 26 us.
+
+---
+
 ## Reference
 
 ### Where a model can be drawn
@@ -2008,6 +2042,9 @@ The types a consumer actually touches.
 | `ParticleEmitter` | `create(style, capacity, x, y, z)`, `spawn(...)`, `isIdle()`, `close()`. Held by the effect, not the visual |
 | `ParticlePool` | `new ParticlePool(ctx, emitter, type, model)` in the visual, `delete()` with it |
 | `GemRenderParticleTypes` | `BILLBOARD`, `MESH`, `STREAK`, `DECAL`, `BODY` to pass to `ParticlePool` |
+| `Canvas` | 2D recorder (section 11): `shared()`, `begin(..)`/`end()`, shapes, sprites, text, `suspend()`/`resume()` |
+| `CanvasTarget` | owned framebuffer a `Canvas` draws into; `texture()` = GL name |
+| `TextBuffer` | fixed-capacity per-frame text with allocation-free number formatting |
 | `ParticleModels` | `additive`, `cutout` and `translucent` billboards; `cutout` is the cheap one, `additive` the one that cannot be ordered against water. `decal(texture)`, `rigid(gltfModel[, bake])` |
 | `ParticleLook` | per-particle colour + light: `of`, `lit`, `blockColour` |
 | `ParticleMotion` | the closed form in Java, for tests and for CPU-side code that needs a particle's position |

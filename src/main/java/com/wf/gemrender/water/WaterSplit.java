@@ -45,6 +45,8 @@ public final class WaterSplit {
     private int frontWidth = -1;
     private int frontHeight = -1;
 
+    private LevelStage pendingStage;
+
     private boolean prepassValid;
 
     private boolean armedComposite;
@@ -96,19 +98,21 @@ public final class WaterSplit {
         pendingLateFront = false;
         cloudFrame = false;
 
-        if (!modeActive() || !WaterDepthPrepass.SUPPORTED || !oitDrawsLastFrame
-                || !programs.ensureCreated()) {
-            return;
-        }
-
-        prepassTimer.begin();
-        prepassValid = prepass.run(stage, programs, cloudsFolded());
-        prepassTimer.end();
-        cloudFrame = prepass.foldedClouds();
+        pendingStage = !modeActive() || !WaterDepthPrepass.SUPPORTED || !oitDrawsLastFrame
+                || !programs.ensureCreated() ? null : stage;
     }
 
+    /** Prepass here, not at AFTER_ENTITIES: Flywheel instances draw after that event => scene depth lacked them. */
     public void beforeOitComposite(OitFramebuffer oit, Runnable resubmit) {
         oitDrawsThisFrame = true;
+
+        if (pendingStage != null) {
+            prepassTimer.begin();
+            prepassValid = prepass.run(pendingStage, programs, cloudsFolded());
+            prepassTimer.end();
+            cloudFrame = prepass.foldedClouds();
+            pendingStage = null;
+        }
 
         if (!prepassValid || !modeActive()) {
             return;

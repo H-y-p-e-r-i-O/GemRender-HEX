@@ -61,6 +61,7 @@ def waterSupported = water_supported.toBoolean()
 def directSupported = direct_supported.toBoolean()
 
 def lightsSupported = lights_supported.toBoolean()
+def uiSupported = ui_supported.toBoolean()
 def directMixinSet = stonecutter.eval(mcVersion, '>=26.1') ? 'direct26' : 'direct'
 def renderDocCompat = stonecutter.eval(mcVersion, '>=26.1')
 def directMixinConfig = "gemrender.${directMixinSet}.mixins.json"
@@ -312,6 +313,14 @@ if (!lightsSupported) {
     sourceSets.main.resources.exclude 'gemrender.light.mixins.json'
     sourceSets.test.java.exclude 'com/wf/gemrender/light/**'
     sourceSets.harness.java.exclude 'com/wf/gemrender/spike/LightSpike.java'
+}
+
+if (!uiSupported) {
+    sourceSets.main.java.exclude 'com/wf/gemrender/ui/**'
+    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/ui/**'
+    sourceSets.main.resources.exclude 'gemrender.ui.mixins.json'
+    sourceSets.main.resources.exclude 'assets/gemrender/shaders/ui/**'
+    sourceSets.test.java.exclude 'com/wf/gemrender/ui/**'
 }
 
 if (!directSupported) {
@@ -710,6 +719,7 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
             direct_path            : directSupported,
             direct_config          : directMixinConfig,
             light_path             : lightsSupported,
+            ui_path                : uiSupported,
             iris_path              : irisSupported,
 
             flywheel_vendored_version: flywheel_vendored_version,

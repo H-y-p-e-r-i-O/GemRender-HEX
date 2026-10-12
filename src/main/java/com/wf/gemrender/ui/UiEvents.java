@@ -1,0 +1,18 @@
+package com.wf.gemrender.ui;
+
+import com.wf.gemrender.GemRender;
+import dev.engine_room.flywheel.api.event.EndClientResourceReloadEvent;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+
+@EventBusSubscriber(modid = GemRender.MOD_ID, value = Dist.CLIENT)
+final class UiEvents {
+    private UiEvents() {
+    }
+
+    @SubscribeEvent
+    static void onEndClientResourceReload(EndClientResourceReloadEvent event) {
+        Canvas.reload();
+    }
+}

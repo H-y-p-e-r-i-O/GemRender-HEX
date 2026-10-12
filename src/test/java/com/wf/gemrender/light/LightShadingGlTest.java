@@ -342,6 +342,32 @@ class LightShadingGlTest {
 		}
 	}
 
+	/** Lightmap call as Veil reprints it (parenthesised operand) and as Sable rewrites it (scaled ivec2 argument). */
+	@Test
+	void rewrittenLightmapCallsStillPatch() {
+		try (HeadlessGl gl = HeadlessGl.createOrSkip()) {
+			for (String name : VANILLA) {
+				String source = vanilla(name + ".vsh").replace("texelFetch(Sampler2, UV2 / 16, 0)", "texelFetch(Sampler2, (UV2 / 16), 0)")
+						.replace("minecraft_sample_lightmap(Sampler2, UV2)",
+								"minecraft_sample_lightmap(Sampler2, ivec2((UV2 * vec2(1.0, 1.0))))");
+				String patched = LightShaders.vanilla(name, true, source);
+				assertThat(patched).as(name).containsAnyOf("_grl_lm(texelFetch(Sampler2, (UV2 / 16), 0))",
+						"_grl_lm(minecraft_sample_lightmap(Sampler2, ivec2((UV2 * vec2(1.0, 1.0)))))");
+				int program = glCreateProgram();
+				int vertex = shader(name, GL_VERTEX_SHADER, patched);
+				int fragment = shader(name, GL_FRAGMENT_SHADER, LightShaders.vanilla(name, false, vanilla(name + ".fsh")));
+				glAttachShader(program, vertex);
+				glAttachShader(program, fragment);
+				glLinkProgram(program);
+				assertThat(glGetProgrami(program, GL_LINK_STATUS)).as(name + ": " + glGetProgramInfoLog(program))
+						.isEqualTo(GL_TRUE);
+				glDeleteShader(vertex);
+				glDeleteShader(fragment);
+				glDeleteProgram(program);
+			}
+		}
+	}
+
 	private static int shader(String name, int type, String source) {
 		int shader = glCreateShader(type);
 		glShaderSource(shader, source);

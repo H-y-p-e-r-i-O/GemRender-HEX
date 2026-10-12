@@ -46,6 +46,10 @@ config = "${direct_config}"
 [[mixins]]
 config = "gemrender.light.mixins.json"
 <% } %>
+<% if (ui_path) { %>
+[[mixins]]
+config = "gemrender.ui.mixins.json"
+<% } %>
 <% if (iris_path) { %>
 # iris-flw-compat is never on the classpath: -Piris drops it into run/mods and no other run has it.
 # Its config is required = false so a launch without it skips the mixin instead of refusing to start.

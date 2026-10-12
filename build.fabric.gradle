@@ -381,6 +381,14 @@ if (!lights_supported.toBoolean()) {
     sourceSets.harness.java.exclude 'com/wf/gemrender/spike/LightSpike.java'
 }
 
+if (!ui_supported.toBoolean()) {
+    sourceSets.main.java.exclude 'com/wf/gemrender/ui/**'
+    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/ui/**'
+    sourceSets.main.resources.exclude 'gemrender.ui.mixins.json'
+    sourceSets.main.resources.exclude 'assets/gemrender/shaders/ui/**'
+    sourceSets.test.java.exclude 'com/wf/gemrender/ui/**'
+}
+
 if (!water_supported.toBoolean()) {
     sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplit.java'
     sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplitPrograms.java'

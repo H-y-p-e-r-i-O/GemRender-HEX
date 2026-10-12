@@ -130,6 +130,12 @@ final class LightGrid {
 
     void upload() {
         int previousUnit = TextureUnits.activate(UNIT);
+        // NativeImage uploads leave ROW_LENGTH / SKIP_* set => full upload overreads `cells` (SIGSEGV).
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, GRID);
+        glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, GRID);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
         if (textureId == 0) {
             textureId = glGenTextures();
             glBindTexture(GL_TEXTURE_3D, textureId);
@@ -139,16 +145,14 @@ final class LightGrid {
             glTexImage3D(GL_TEXTURE_3D, 0, GL_RG32UI, GRID, GRID, GRID, 0, GL_RG_INTEGER, GL_UNSIGNED_INT, cells);
         } else {
             glBindTexture(GL_TEXTURE_3D, textureId);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, GRID);
-            glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, GRID);
             uploadBox(previous);
             uploadBox(current);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-            glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
-            glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-            glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-            glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
         }
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
         TextureUnits.restore(previousUnit);
     }
 
