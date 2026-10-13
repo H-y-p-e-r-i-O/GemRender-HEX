@@ -8,6 +8,7 @@ import org.lwjgl.system.MemoryUtil;
 import java.nio.FloatBuffer;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.function.BooleanSupplier;
 
 import static org.lwjgl.opengl.GL30C.GL_RGBA32F;
 import static org.lwjgl.opengl.GL31C.GL_TEXTURE_BUFFER;
@@ -40,6 +41,11 @@ public final class VolumeBuffer {
     private int textureId;
 
     private FloatBuffer staging;
+
+    private BooleanSupplier hidden = () -> false;
+    private int hiddenBufferId;
+    private int hiddenTextureId;
+    private int hiddenFloats;
 
     private VolumeBuffer() {
     }
@@ -177,16 +183,55 @@ public final class VolumeBuffer {
         bind();
     }
 
+    /**
+     * {@code when} true at {@link #bind} => every volume draws nothing (zeroed slots), e.g. a sensor pass that sees
+     * through gas. Callers changing its answer mid-frame call {@link #bind}.
+     */
+    public void hideWhen(BooleanSupplier when) {
+        hidden = when;
+    }
+
     public void bind() {
         if (textureId == 0) {
             return;
         }
 
+        int texture = hidden.getAsBoolean() ? hiddenTexture() : textureId;
         int previousUnit = TextureUnits.activate(TEXTURE_UNIT);
         try {
-            glBindTexture(GL_TEXTURE_BUFFER, textureId);
+            glBindTexture(GL_TEXTURE_BUFFER, texture);
         } finally {
             TextureUnits.restore(previousUnit);
+        }
+    }
+
+    /** Zeros sized like {@link #data}: extent and density 0. */
+    private int hiddenTexture() {
+        synchronized (lock) {
+            if (hiddenFloats != data.length) {
+                if (hiddenTextureId == 0) {
+                    hiddenBufferId = glGenBuffers();
+                    hiddenTextureId = glGenTextures();
+                }
+                int previousBuffer = glGetInteger(GL_ARRAY_BUFFER_BINDING);
+                FloatBuffer zeros = MemoryUtil.memCallocFloat(data.length);
+                try {
+                    glBindBuffer(GL_ARRAY_BUFFER, hiddenBufferId);
+                    glBufferData(GL_ARRAY_BUFFER, zeros, GL_STATIC_DRAW);
+                } finally {
+                    MemoryUtil.memFree(zeros);
+                    glBindBuffer(GL_ARRAY_BUFFER, previousBuffer);
+                }
+                int previousUnit = TextureUnits.activate(TEXTURE_UNIT);
+                try {
+                    glBindTexture(GL_TEXTURE_BUFFER, hiddenTextureId);
+                    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, hiddenBufferId);
+                } finally {
+                    TextureUnits.restore(previousUnit);
+                }
+                hiddenFloats = data.length;
+            }
+            return hiddenTextureId;
         }
     }
 

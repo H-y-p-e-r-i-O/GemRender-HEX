@@ -50,6 +50,7 @@ public final class CameraMedium {
     private static final float[] LIGHT0 = normalized(0.2f, 1.0f, -0.7f);
 
     private final PassState state = new PassState();
+    private java.util.function.BooleanSupplier hidden = () -> false;
     private final GpuStampTimer timer = new GpuStampTimer();
     private final float[] matrix = new float[16];
 
@@ -200,8 +201,13 @@ public final class CameraMedium {
     }
 
     /** After the level, main target bound. {@code projection x modelView} = camera-relative world to clip. */
+    /** {@code when} true at {@link #draw} => no fog (sensor seeing through the medium). */
+    public void hideWhen(java.util.function.BooleanSupplier when) {
+        hidden = when;
+    }
+
     public void draw(Matrix4fc projection, Matrix4fc modelView, Vec3 camera) {
-        if (!active || !ensureCreated()) {
+        if (!active || hidden.getAsBoolean() || !ensureCreated()) {
             return;
         }
         RenderTarget main = Minecraft.getInstance()

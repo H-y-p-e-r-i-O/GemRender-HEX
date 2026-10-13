@@ -1250,6 +1250,7 @@ DirectRenderer.submit(model, palette, morphs, pose, light, overlay, argb, Direct
 ```
 
 - Unbound (`null`) => that slot's meshes not drawn; the overloads without `TextureSlots` bind none.
+- `TextureSlots.emissive(slot)` => slot unlit (displays): no diffuse, lightmap, dynamic lights; overlay still applies.
 - Slot primitives: never atlased, UVs as authored, merged per (slot, material); batched per (mesh, texture).
 - Direct path only: outside the Flywheel `Model` => world visuals draw none. `GemRenderGltfModel.slots()` lists them.
 
@@ -1863,6 +1864,25 @@ Lights.register((sink, partialTick) -> {
 
 `Lights.MAX` = 64 per frame after frustum culling; nearest kept.
 
+### Infrared
+
+`point(..., shadow, ir)` / `spot(..., shadow, ir)`: `ir = true` => shaded per the pass's `Lights.IrView`, from
+the one source `Lights.irView(Supplier<IrView>)` polled at every level pass start (offscreen passes included).
+
+| `IrView` | IR lights |
+|---|---|
+| `OFF` (default) | dropped at collection |
+| `SPLIT` | main view only: `albedo x E_ir` -> `IrTarget.texture()` (RGBA16F, COLOR1 from `AFTER_SKY` through the hand); colour untouched. `IrTarget.filled()` after the level render |
+| `MERGED` | added into colour (IR sensor views) |
+
+`Lights.nightSky(ToDoubleFunction<IrView>)`: moon + starlight irradiance on a fully sky-lit surface x (lightmap sky
+level)^2 (roofed / caves 0); `SPLIT` => IR channel (16F), `MERGED` => colour (8-bit: < ~1/255 after albedo vanishes =>
+merged sensors pre-scale), `OFF` => none.
+
+Not in `IrTarget`: Fabulous translucent/particle/weather targets, Flywheel OIT.
+
+Lightmap: albedo recovery floors the lightmap at 1/255 => darkness mods zeroing it still light dynamically.
+
 ### Shadows
 
 - Traced per frame against a 1-bit block grid 128^3 around the camera (±64 blocks). Nothing past the grid is lit by a shadowed light.
@@ -1891,6 +1911,8 @@ color.rgb += albedo * gemrender_lights(p, gemrender_lightNormal(n));
 `p` camera-relative world position, `n` world-oriented (zero = no facing, e.g. billboards);
 `gemrender_lightFaceNormal(p)` for a format without normals. After linking call
 `LightShaders.bindProgram(program)`. Texture units 20-23 are taken. Albedo is colour without the lightmap.
+IR: `_grl_irSum` after the call (already inside the result under `MERGED`); under `SPLIT` write
+`albedo * (_grl_irSum + gemrender_nightSky(skyLevel))` to `layout(location = 1)`.
 
 ### Shader packs
 

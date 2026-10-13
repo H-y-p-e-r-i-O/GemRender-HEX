@@ -1,6 +1,7 @@
 package com.wf.gemrender.direct;
 
 import com.wf.gemrender.gltf.GemRenderGltfModel;
+import com.wf.gemrender.gltf.NodeTable;
 import com.wf.gemrender.texture.VariantUv;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -39,5 +40,23 @@ public interface ArmorAppearance {
      */
     default int tint(@Nullable LivingEntity entity, ItemStack stack, EquipmentSlot slot) {
         return 0xFFFFFFFF;
+    }
+
+    /** Child models drawn at this piece's socket nodes (posed), same light and tint. */
+    default void attachments(@Nullable LivingEntity entity, ItemStack stack, EquipmentSlot slot, Attachments out) {
+    }
+
+    @FunctionalInterface
+    interface Attachments {
+        /**
+         * @param socket node name in the piece's model; missing => skipped, warned once per model
+         * @param pose   writes the child's node state (starts at rest); null = rest
+         */
+        void attach(GemRenderGltfModel child, String socket, @Nullable ChildPose pose);
+    }
+
+    @FunctionalInterface
+    interface ChildPose {
+        void pose(NodeTable table, float[] state);
     }
 }

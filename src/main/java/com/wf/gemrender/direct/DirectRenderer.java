@@ -35,6 +35,8 @@ public final class DirectRenderer {
     static final int UNIT_LIGHTMAP = 2;
 
     private static final float QUANTUM_SECONDS = 1.0f / 128.0f;
+    /** Packed light no level produces => {@link TextureSlots#emissive}. */
+    private static final int EMISSIVE = -1;
 
     private static final Map<DirectPass, PassQueue> QUEUES = new EnumMap<>(DirectPass.class);
 
@@ -252,6 +254,7 @@ public final class DirectRenderer {
                                 TextureSlots slots) {
         for (ResidentModel.Part part : resident.parts()) {
             Batch batch;
+            int partLight = light;
             if (part.slot() == null) {
                 batch = queue.batch(part);
             } else {
@@ -260,8 +263,9 @@ public final class DirectRenderer {
                     continue;
                 }
                 batch = queue.batch(part, texture);
+                partLight = slots.emissive(part.slot()) ? EMISSIVE : light;
             }
-            write(batch, batch.reserve(), pose, slot, light, overlay, argb, variant, paint, reference, restBase);
+            write(batch, batch.reserve(), pose, slot, partLight, overlay, argb, variant, paint, reference, restBase);
         }
     }
 
@@ -311,8 +315,13 @@ public final class DirectRenderer {
         MemoryUtil.memPutInt(address + 64, slot.boneBase());
         MemoryUtil.memPutInt(address + 68, slot.morphBase());
 
-        MemoryUtil.memPutFloat(address + 72, ((light & 0xFFFF) + 8.0f) / 256.0f);
-        MemoryUtil.memPutFloat(address + 76, ((light >>> 16 & 0xFFFF) + 8.0f) / 256.0f);
+        if (light == EMISSIVE) {
+            MemoryUtil.memPutFloat(address + 72, -1.0f);
+            MemoryUtil.memPutFloat(address + 76, -1.0f);
+        } else {
+            MemoryUtil.memPutFloat(address + 72, ((light & 0xFFFF) + 8.0f) / 256.0f);
+            MemoryUtil.memPutFloat(address + 76, ((light >>> 16 & 0xFFFF) + 8.0f) / 256.0f);
+        }
 
         MemoryUtil.memPutByte(address + 80, (byte) (argb >> 16 & 0xFF));
         MemoryUtil.memPutByte(address + 81, (byte) (argb >> 8 & 0xFF));

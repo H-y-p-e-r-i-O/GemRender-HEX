@@ -36,8 +36,9 @@ import static org.lwjgl.opengl.GL30C.glBindBufferBase;
 public final class LightFrame {
     public static final int UBO_BINDING = Integer.getInteger("gemrender.lightubo", 12);
 
-    /** Header (camera frac, section + count) + 5 vec4 per light. */
-    static final int UBO_BYTES = 32 + Lights.MAX * 80;
+    /** Header (camera frac + IrView, section + count, night sky) + 5 vec4 per light. */
+    static final int HEADER_BYTES = 48;
+    static final int UBO_BYTES = HEADER_BYTES + Lights.MAX * 80;
 
     private static final LightFrame INSTANCE = new LightFrame();
 
@@ -53,6 +54,7 @@ public final class LightFrame {
     private final GpuStampTimer levelGpu = new GpuStampTimer();
 
     private int collected;
+    private Lights.IrView irView = Lights.IrView.OFF;
     private int fullBuffer;
     private int emptyBuffer;
     private boolean active;
@@ -102,6 +104,7 @@ public final class LightFrame {
         ensureBuffers();
 
         collected = 0;
+        irView = Lights.irView();
         for (Lights.Provider provider : Lights.providers()) {
             provider.collect(sink, partialTick);
         }
@@ -129,8 +132,10 @@ public final class LightFrame {
         grid.begin();
         ubo.clear();
         ubo.putFloat((float) (eye.x - camSx * 16.0)).putFloat((float) (eye.y - camSy * 16.0))
-                .putFloat((float) (eye.z - camSz * 16.0)).putFloat(0.0f);
+                .putFloat((float) (eye.z - camSz * 16.0)).putFloat(irView.ordinal());
         ubo.putInt(camSx).putInt(camSy).putInt(camSz).putInt(0);
+        float night = irView == Lights.IrView.OFF ? 0.0f : Lights.nightSky(irView);
+        ubo.putFloat(night).putFloat(0.0f).putFloat(0.0f).putFloat(0.0f);
         int shaded = 0;
         int dropped = 0;
         for (int i = 0; i < count && shaded < Lights.MAX; i++) {
@@ -158,9 +163,10 @@ public final class LightFrame {
         grid.upload();
         occupancy.upload();
         LightCookies.bind();
-        glBindBufferBase(GL_UNIFORM_BUFFER, UBO_BINDING, shaded == 0 ? emptyBuffer : fullBuffer);
+        glBindBufferBase(GL_UNIFORM_BUFFER, UBO_BINDING, shaded == 0 && night == 0.0f ? emptyBuffer : fullBuffer);
         shadows.trace();
-        active = shaded > 0;
+        active = shaded > 0 || night > 0.0f;
+        IrTarget.pass(irView == Lights.IrView.SPLIT);
 
         Arrays.fill(visible, 0, count, null);
         lastCollected = collected;
@@ -173,6 +179,7 @@ public final class LightFrame {
     }
 
     public void end() {
+        IrTarget.end();
         levelGpu.end();
         if (!active) {
             return;
@@ -225,14 +232,22 @@ public final class LightFrame {
 
     private final class Sink implements LightSink {
         @Override
-        public void point(double x, double y, double z, float range, int rgb, float intensity, boolean shadow) {
+        public void point(double x, double y, double z, float range, int rgb, float intensity, boolean shadow,
+                          boolean ir) {
+            if (ir && irView == Lights.IrView.OFF) {
+                return;
+            }
             next().set(x, y, z, range, rgb, intensity, false, 0, 0, 0, 0, 0, 0, -2.0f, 1.0f, -1, shadow);
+            pool.get(collected - 1).ir = ir;
         }
 
         @Override
         public void spot(double x, double y, double z, Vector3fc direction, Vector3fc up, float range,
                          float innerDegrees, float outerDegrees, int rgb, float intensity,
-                         @Nullable LightCookie cookie, boolean shadow) {
+                         @Nullable LightCookie cookie, boolean shadow, boolean ir) {
+            if (ir && irView == Lights.IrView.OFF) {
+                return;
+            }
             float cosOuter = (float) Math.cos(Math.toRadians(outerDegrees));
             float cosInner = (float) Math.cos(Math.toRadians(Math.min(innerDegrees, outerDegrees)));
             float ux = up.x(), uy = up.y(), uz = up.z();
@@ -244,6 +259,7 @@ public final class LightFrame {
             next().set(x, y, z, range, rgb, intensity, true, direction.x(), direction.y(), direction.z(),
                     ux / length, uy / length, uz / length, cosOuter, 1.0f / Math.max(cosInner - cosOuter, 1.0e-4f),
                     cookie == null ? -1 : cookie.layer(), shadow);
+            pool.get(collected - 1).ir = ir;
         }
     }
 
@@ -254,6 +270,7 @@ public final class LightFrame {
         float dx, dy, dz, ux, uy, uz, cosOuter, spotScale;
         int cookie;
         boolean shadow;
+        boolean ir;
         int tile = -1;
 
         float rx, ry, rz;
@@ -281,6 +298,7 @@ public final class LightFrame {
             this.spotScale = spotScale;
             this.cookie = cookie;
             this.shadow = shadow;
+            this.ir = false;
         }
 
         /** Camera-relative position; bound sphere = range sphere (point) or cone hull (spot). */
@@ -314,7 +332,7 @@ public final class LightFrame {
             out.putFloat(r).putFloat(g).putFloat(b).putFloat(cookie);
             out.putFloat(dx).putFloat(dy).putFloat(dz).putFloat(spot ? cosOuter : -2.0f);
             out.putFloat(ux).putFloat(uy).putFloat(uz).putFloat(spotScale);
-            out.putFloat(tile).putFloat(0.0f).putFloat(0.0f).putFloat(0.0f);
+            out.putFloat(tile).putFloat(ir ? 1.0f : 0.0f).putFloat(0.0f).putFloat(0.0f);
         }
     }
 }

@@ -2,9 +2,12 @@
 
 #define GEMRENDER_LIGHTS
 
+// _grl_cameraFrac.w = Lights.IrView ordinal; _grl_lights[i*5+4].y = 1 => IR light.
+// _grl_night.x = night-sky irradiance on fully sky-lit surfaces, IR/NV channel only (Lights.nightSky).
 layout(std140) uniform GemRenderLights {
     vec4 _grl_cameraFrac;
     ivec4 _grl_cameraSection;
+    vec4 _grl_night;
     vec4 _grl_lights[GEMRENDER_LIGHT_MAX * 5];
 };
 
@@ -14,6 +17,8 @@ uniform sampler2D _grl_shadows;
 
 vec3 _grl_dpx;
 vec3 _grl_dpy;
+// IR irradiance of the last gemrender_lights call; already in its result when IrView.MERGED.
+vec3 _grl_irSum;
 
 // Uniform control flow only: derivatives.
 void gemrender_lightPrepare(vec3 _grl_p) {
@@ -124,6 +129,7 @@ vec3 _grl_one(int _grl_i, vec3 _grl_p, vec3 _grl_n, float _grl_footprint) {
 
 // p camera-relative; n world-oriented, zero = no facing. Returns irradiance multiplier for albedo.
 vec3 gemrender_lights(vec3 _grl_p, vec3 _grl_n) {
+    _grl_irSum = vec3(0.0);
     if (_grl_cameraSection.w == 0) {
         return vec3(0.0);
     }
@@ -139,10 +145,25 @@ vec3 gemrender_lights(vec3 _grl_p, vec3 _grl_n) {
         while (_grl_m != 0u) {
             uint _grl_bit = _grl_m & (~_grl_m + 1u);
             _grl_m ^= _grl_bit;
-            _grl_sum += _grl_one(_grl_word * 32 + int(round(log2(float(_grl_bit)))), _grl_p, _grl_n, _grl_footprint);
+            int _grl_i = _grl_word * 32 + int(round(log2(float(_grl_bit))));
+            vec3 _grl_e = _grl_one(_grl_i, _grl_p, _grl_n, _grl_footprint);
+            if (_grl_lights[_grl_i * 5 + 4].y > 0.5) {
+                _grl_irSum += _grl_e;
+            } else {
+                _grl_sum += _grl_e;
+            }
         }
     }
-    return _grl_sum;
+    return _grl_sum + _grl_irSum * step(1.5, _grl_cameraFrac.w);
+}
+
+// Moon + starlight; sky = lightmap sky level 0..1. SPLIT: IR channel; MERGED: colour (gemrender_mergedNight).
+vec3 gemrender_nightSky(float _grl_skyLevel) {
+    return vec3(_grl_night.x * _grl_skyLevel * _grl_skyLevel);
+}
+
+vec3 gemrender_mergedNight(float _grl_skyLevel) {
+    return gemrender_nightSky(_grl_skyLevel) * step(1.5, _grl_cameraFrac.w);
 }
 
 // Zero stays zero: no facing.

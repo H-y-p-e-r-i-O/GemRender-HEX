@@ -13,6 +13,8 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
+import com.wf.gemrender.texture.VariantUv;
+import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 
 import java.util.LinkedHashMap;
@@ -113,6 +115,13 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
      * Per model, the resolved node slot for each vanilla part; {@code -1} where the asset has none.
      */
     private final Map<GemRenderGltfModel, int[]> bindings = new LinkedHashMap<>();
+
+    private final java.util.Set<GemRenderGltfModel> missingSockets = java.util.Collections.newSetFromMap(
+            new java.util.WeakHashMap<>());
+    private final Matrix4f socketMatrix = new Matrix4f();
+    private final Matrix4f nodeMatrix = new Matrix4f();
+    private final Matrix4f localMatrix = new Matrix4f();
+    private int[] chain = new int[16];
 
     private final Quaternionf scratchRotation = new Quaternionf();
     private final Quaternionf restRotation = new Quaternionf();
@@ -254,9 +263,31 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
             // upside down and mirrored -- which reads as a broken export rather than a space mismatch.
             pose.scale(-1.0f, -1.0f, 1.0f);
 
+            int tint = appearance.tint(entity, stack, slot);
             DirectRenderer.submit(model, state, pose.last()
-                            .pose(), light, overlay, appearance.tint(entity, stack, slot), DirectPass.LEVEL,
+                            .pose(), light, overlay, tint, DirectPass.LEVEL,
                     appearance.variant(entity, stack, slot));
+            appearance.attachments(entity, stack, slot, (child, socket, childPose) -> {
+                int at = table.slotOfName(socket);
+                if (at < 0) {
+                    if (missingSockets.add(model)) {
+                        GemRender.LOGGER.warn("GemRender armour model has no socket node '{}'; attachment skipped", socket);
+                    }
+                    return;
+                }
+                float[] childState = child.layout()
+                        .nodeTable()
+                        .newScratch();
+                if (childPose != null) {
+                    childPose.pose(child.layout()
+                            .nodeTable(), childState);
+                }
+                socketMatrix.set(pose.last()
+                        .pose())
+                        .mul(nodeMatrix(table, state, at));
+                DirectRenderer.submit(child, childState, socketMatrix, light, overlay, tint, DirectPass.LEVEL,
+                        VariantUv.NONE);
+            });
         } finally {
             pose.popPose();
         }
@@ -280,6 +311,24 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
                 .mul(new Quaternionf().rotationZYX(part.zRot, -part.yRot, -part.xRot));
 
         table.setRotation(state, slotIndex, scratchRotation);
+    }
+
+    /** Model-space transform of {@code slot}: root-to-node product of local transforms. */
+    private Matrix4f nodeMatrix(NodeTable table, float[] state, int slot) {
+        int[] parents = table.parentSlots();
+        int depth = 0;
+        for (int s = slot; s >= 0; s = parents[s]) {
+            if (depth == chain.length) {
+                chain = java.util.Arrays.copyOf(chain, depth * 2);
+            }
+            chain[depth++] = s;
+        }
+        nodeMatrix.identity();
+        for (int i = depth - 1; i >= 0; i--) {
+            table.localTransform(state, chain[i], localMatrix);
+            nodeMatrix.mul(localMatrix);
+        }
+        return nodeMatrix;
     }
 
     private int[] resolve(NodeTable table) {

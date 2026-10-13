@@ -13,4 +13,9 @@ public interface TextureSlots {
 
     @Nullable
     ResourceLocation texture(String slot);
+
+    /** {@code true} => {@code slot}'s meshes unlit: texture colour as is, no shading, lightmap or dynamic lights. */
+    default boolean emissive(String slot) {
+        return false;
+    }
 }

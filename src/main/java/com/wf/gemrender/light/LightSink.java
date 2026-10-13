@@ -12,7 +12,12 @@ public interface LightSink {
      * @param shadow occluded by full opaque blocks within 64 blocks of the camera section. Shadowed light =>
      *               nothing lit past that window; source outside it, or beyond the nearest 16 shadowed => not shaded
      */
-    void point(double x, double y, double z, float range, int rgb, float intensity, boolean shadow);
+    default void point(double x, double y, double z, float range, int rgb, float intensity, boolean shadow) {
+        point(x, y, z, range, rgb, intensity, shadow, false);
+    }
+
+    /** @param ir infrared: shaded only under {@link Lights.IrView#SPLIT} / {@link Lights.IrView#MERGED} */
+    void point(double x, double y, double z, float range, int rgb, float intensity, boolean shadow, boolean ir);
 
     /**
      * @param direction unit beam axis
@@ -20,7 +25,14 @@ public interface LightSink {
      * @param outerDegrees half angle, {@code < 89}
      * @param shadow       as {@link #point}
      */
+    default void spot(double x, double y, double z, Vector3fc direction, Vector3fc up, float range,
+                      float innerDegrees, float outerDegrees, int rgb, float intensity, @Nullable LightCookie cookie,
+                      boolean shadow) {
+        spot(x, y, z, direction, up, range, innerDegrees, outerDegrees, rgb, intensity, cookie, shadow, false);
+    }
+
+    /** @param ir as {@link #point(double, double, double, float, int, float, boolean, boolean)} */
     void spot(double x, double y, double z, Vector3fc direction, Vector3fc up, float range,
               float innerDegrees, float outerDegrees, int rgb, float intensity, @Nullable LightCookie cookie,
-              boolean shadow);
+              boolean shadow, boolean ir);
 }
