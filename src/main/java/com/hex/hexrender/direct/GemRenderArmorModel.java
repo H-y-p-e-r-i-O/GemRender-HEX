@@ -165,7 +165,11 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
     //? if >=1.21 <26.1 {
     @Override
     public void renderToBuffer(PoseStack pose, VertexConsumer buffer, int light, int overlay, int colour) {
-        render(pose, light, overlay);
+        if (IrisDirectBridge.isShaderPackInUse()) {
+            renderVanilla(pose, buffer, light, overlay, colour);
+        } else {
+            render(pose, light, overlay);
+        }
     }
     //?}
 
@@ -236,6 +240,43 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
             DirectRenderer.submit(model, state, pose.last()
                             .pose(), light, overlay, appearance.tint(entity, stack, slot), DirectPass.LEVEL,
                     appearance.variant(entity, stack, slot));
+        } finally {
+            pose.popPose();
+        }
+    }
+
+    private void renderVanilla(PoseStack pose, VertexConsumer buffer, int light, int overlay, int colour) {
+        if (entity == null || stack == null || slot == null || !pending) {
+            return;
+        }
+        pending = false;
+
+        GemRenderGltfModel model = appearance.model(entity, stack, slot);
+        if (model == null) {
+            return;
+        }
+
+        NodeTable table = model.layout()
+                .nodeTable();
+        int[] binding = bindings.computeIfAbsent(model, key -> resolve(table));
+
+        float[] state = table.newScratch();
+        applyPart(table, state, binding[0], head);
+        applyPart(table, state, binding[1], body);
+        applyPart(table, state, binding[2], leftArm);
+        applyPart(table, state, binding[3], rightArm);
+        applyPart(table, state, binding[4], leftLeg);
+        applyPart(table, state, binding[5], rightLeg);
+
+        pose.pushPose();
+        try {
+            pose.scale(-1.0f, -1.0f, 1.0f);
+            int tint = appearance.tint(entity, stack, slot);
+            if (tint == 0xFFFFFFFF && colour != 0xFFFFFFFF) {
+                tint = colour;
+            }
+            GltfVanillaRenderer.renderToConsumer(model, state, pose, buffer, light, overlay,
+                    tint, appearance.variant(entity, stack, slot));
         } finally {
             pose.popPose();
         }

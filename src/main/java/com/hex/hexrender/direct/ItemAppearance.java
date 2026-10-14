@@ -95,4 +95,11 @@ public interface ItemAppearance {
     default int tint(ItemStack stack, ItemDisplayContext context) {
         return 0xFFFFFFFF;
     }
+
+    /**
+     * Texture slots for model primitives with dynamic/substitutable textures.
+     */
+    default TextureSlots slots(ItemStack stack, ItemDisplayContext context) {
+        return TextureSlots.NONE;
+    }
 }
