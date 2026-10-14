@@ -115,14 +115,26 @@ public final class DirectVanilla {
         Minecraft mc = Minecraft.getInstance();
         ClientLevel level = mc.level;
         if (level == null || !level.dimensionType().hasSkyLight()) {
+            //? if >=26.1 {
+            /*return nether() ? LEVEL_NETHER : LEVEL;
+            *///?} else {
             return RenderSystemAccessor.gemrender$shaderLightDirections();
+            //?}
         }
 
         Camera camera = mc.gameRenderer != null ? mc.gameRenderer.getMainCamera() : null;
         if (camera == null || !camera.isInitialized()) {
+            //? if >=26.1 {
+            /*return nether() ? LEVEL_NETHER : LEVEL;
+            *///?} else {
             return RenderSystemAccessor.gemrender$shaderLightDirections();
+            //?}
         }
 
+        //? if >=26.1 {
+        /*// Dynamic lighting not implemented for 26.1 yet due to API changes
+        return nether() ? LEVEL_NETHER : LEVEL;
+        *///?} else {
         float partialTick = com.wf.gemrender.render.Vanilla.partialTick();
         float celestialAngle = level.getTimeOfDay(partialTick);
         float angleRad = celestialAngle * ((float) Math.PI * 2.0F);
@@ -149,6 +161,7 @@ public final class DirectVanilla {
         Vector3f light1View = new Vector3f(-light0View.x() * 0.4F, 0.6F, -light0View.z() * 0.4F).normalize();
 
         return new Vector3f[] { light0View, light1View };
+        //?}
     }
 
     //? if >=26.1 {
