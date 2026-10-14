@@ -1,7 +1,7 @@
 {
   "required": true,
   "minVersion": "0.8.5",
-  "package": "com.wf.gemrender.mixin.direct26",
+  "package": "com.hex.hexrender.mixin.direct26",
   "compatibilityLevel": "JAVA_21",
   "injectors": {
     "defaultRequire": 1

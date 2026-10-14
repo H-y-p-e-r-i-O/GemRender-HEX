@@ -8,7 +8,7 @@
   "environment": "client",
   "entrypoints": {
     "client": [
-      "com.wf.gemrender.GemRenderFabric"
+      "com.hex.hexrender.GemRenderFabric"
     ]
   },
   "mixins": [

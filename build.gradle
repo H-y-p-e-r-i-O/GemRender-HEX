@@ -266,7 +266,7 @@ sourceSets {
     }
 }
 tasks.named('jar') {
-    exclude 'assets/gemrender/models/vehicles/**'
+    exclude 'assets/hexrender/models/vehicles/**'
 
     if (flywheelVendored) {
         from sourceSets.flywheel.output
@@ -282,54 +282,54 @@ tasks.named('jar') {
 // wrapped in `//? if fabric` may not contain an `//? if <1.21 { } else { }` underneath it. Excluding
 // the package keeps both guards flat. build.fabric.gradle excludes the mirror image -- see the
 // WaterSplitEvents and DirectEvents lines there.
-sourceSets.main.java.exclude 'com/wf/gemrender/fabric/**'
-sourceSets.harness.java.exclude 'com/wf/gemrender/fabric/**'
-sourceSets.bench.java.exclude 'com/wf/gemrender/fabric/**'
+sourceSets.main.java.exclude 'com/hex/hexrender/fabric/**'
+sourceSets.harness.java.exclude 'com/hex/hexrender/fabric/**'
+sourceSets.bench.java.exclude 'com/hex/hexrender/fabric/**'
 
 if (!irisSupported) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/iris/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/iris/**'
 }
 
 // Each bridge goes in only where it is resolvable. build.fabric.gradle splits these the same way and
 // for the same reason: 1.20.1 has no iris-flw-compat on one loader and none of Colorwheel on
 // another, and a mixin config naming a class that was never compiled is a hard load failure.
 if (!irisSupported || !irisflw_version) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/irisflw/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/mixin/irisflw/**'
     sourceSets.main.resources.exclude 'gemrender.irisflw.mixins.json'
 }
 
 if (!irisSupported || !colorwheel_version) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/colorwheel/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/mixin/colorwheel/**'
     sourceSets.main.resources.exclude 'gemrender.colorwheel.mixins.json'
 }
 
 ['direct', 'direct26'].each { set ->
     if (!directSupported || set != directMixinSet) {
-        sourceSets.main.java.exclude "com/wf/gemrender/mixin/${set}/**"
+        sourceSets.main.java.exclude "com/hex/hexrender/mixin/${set}/**"
         sourceSets.main.resources.exclude "gemrender.${set}.mixins.json"
     }
 }
 
 if (!directSupported) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/direct/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/direct/**'
 
     // The item the direct path hands the player and the two models that dress it belong to that path,
     // not to the harness, and the harness only reaches them through it. Every NeoForge/Forge node has
     // direct on today, so this is here to stop the flag being a trap rather than because it fires.
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/DirectSpike.java'
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItem.java'
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItems.java'
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItemEvents.java'
-    sourceSets.harness.resources.exclude 'assets/gemrender/items/**'
-    sourceSets.harness.resources.exclude 'assets/gemrender/models/item/**'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/DirectSpike.java'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/SpikeItem.java'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/SpikeItems.java'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/SpikeItemEvents.java'
+    sourceSets.harness.resources.exclude 'assets/hexrender/items/**'
+    sourceSets.harness.resources.exclude 'assets/hexrender/models/item/**'
 }
 
 if (harnessSupported) {
     if (stonecutter.eval(mcVersion, '>=26.1')) {
-        sourceSets.harness.resources.exclude 'assets/gemrender/models/item/spike.json'
+        sourceSets.harness.resources.exclude 'assets/hexrender/models/item/spike.json'
     } else {
-        sourceSets.harness.resources.exclude 'assets/gemrender/items/**'
-        sourceSets.harness.resources.exclude 'assets/gemrender/models/item/spike_base.json'
+        sourceSets.harness.resources.exclude 'assets/hexrender/items/**'
+        sourceSets.harness.resources.exclude 'assets/hexrender/models/item/spike_base.json'
     }
 }
 
@@ -651,7 +651,7 @@ tasks.register('makeKtxAssets', JavaExec) {
     classpath = sourceSets.ktxTest.runtimeClasspath
 
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(java_version as int) }
-    mainClass = 'com.wf.gemrender.texture.MakeKtxAssets'
+    mainClass = 'com.hex.hexrender.texture.MakeKtxAssets'
     args repoRoot.absolutePath
     dependsOn tasks.named('ktxTestClasses')
 }

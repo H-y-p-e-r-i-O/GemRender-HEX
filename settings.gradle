@@ -34,7 +34,7 @@ plugins {
     id 'dev.kikugie.stonecutter' version '0.9.8'
 }
 
-rootProject.name = 'gemrender'
+rootProject.name = 'hexrender'
 
 stonecutter {
     // The whole build is Groovy and stays Groovy: a KTS controller beside a 1200-line Groovy

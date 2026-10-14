@@ -5,7 +5,7 @@ loaderVersion = "${loader_version_range}"
 license = "${mod_license}"
 
 [[mods]]
-modId = "gemrender"
+modId = "hexrender"
 version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
@@ -73,7 +73,7 @@ config = "flywheel.impl.neoforge.mixins.json"
 <% } %>
 
 # --- Required: NeoForge ---
-[[dependencies.gemrender]]
+[[dependencies.hexrender]]
 modId = "neoforge"
 type = "required"
 versionRange = "${platform_version_range}"
@@ -81,7 +81,7 @@ ordering = "NONE"
 side = "BOTH"
 
 # --- Required: Minecraft ---
-[[dependencies.gemrender]]
+[[dependencies.hexrender]]
 modId = "minecraft"
 type = "required"
 versionRange = "${minecraft_version_range}"
@@ -97,7 +97,7 @@ side = "BOTH"
 # required: the range below is what GemRender needs of whichever copy ends up loading.
 #
 # ordering = AFTER so Flywheel's backends are registered before GemRender asks for an Instancer.
-<% if (flywheel_dependency) { %>[[dependencies.gemrender]]
+<% if (flywheel_dependency) { %>[[dependencies.hexrender]]
 modId = "flywheel"
 type = "required"
 versionRange = "${flywheel_version_range}"

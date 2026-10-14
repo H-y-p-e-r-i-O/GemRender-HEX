@@ -14,7 +14,7 @@ loaderVersion = "${loader_version_range}"
 license = "${mod_license}"
 
 [[mods]]
-modId = "gemrender"
+modId = "hexrender"
 version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
@@ -23,7 +23,7 @@ description = '''${mod_description}'''
 displayTest = "IGNORE_ALL_VERSION"
 
 # --- Required: Minecraft ---
-[[dependencies.gemrender]]
+[[dependencies.hexrender]]
 modId = "minecraft"
 mandatory = true
 versionRange = "${minecraft_version_range}"
@@ -31,7 +31,7 @@ ordering = "NONE"
 side = "BOTH"
 
 # --- Required: Forge ---
-[[dependencies.gemrender]]
+[[dependencies.hexrender]]
 modId = "forge"
 mandatory = true
 versionRange = "${platform_version_range}"
@@ -46,7 +46,7 @@ side = "BOTH"
 # two as one dependency and loads a single copy. A Flywheel installed in mods/ wins over both.
 #
 # ordering = AFTER so Flywheel's backends are registered before GemRender asks for an Instancer.
-[[dependencies.gemrender]]
+[[dependencies.hexrender]]
 modId = "flywheel"
 mandatory = true
 versionRange = "${flywheel_version_range}"

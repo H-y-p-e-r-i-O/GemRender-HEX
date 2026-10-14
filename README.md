@@ -112,7 +112,7 @@ GemRender is a **required client-side dependency** of a mod that draws through i
   copy, and a Flywheel in `mods/` displaces both. On 26.1 there is no published Flywheel: this jar
   *provides* the engine rather than bundling it, so a Flywheel in `mods/` there is a duplicate mod id
   and will not load
-- Iris is `compileOnly` and optional. `com.wf.gemrender.iris` names Iris types to register a LabPBR
+- Iris is `compileOnly` and optional. `com.hex.hexrender.iris` names Iris types to register a LabPBR
   loader, and that package is entered only after a `ModList` check
 - `org.lwjgl:lwjgl-ktx` for `.ktx2` model textures and for encoding stitched sheets – jar-in-jar'd,
   pinned to the LWJGL version Minecraft ships

@@ -484,7 +484,7 @@ The counting argument in `AnimationPhase.snap` applies unchanged, once per layer
 
 ### Blending: crossfades, masks, additive layers
 
-Layers above overwrite in order. `AnimationBlend` weights them. Package `com.wf.gemrender.gltf.blend`.
+Layers above overwrite in order. `AnimationBlend` weights them. Package `com.hex.hexrender.gltf.blend`.
 
 | Type | Role |
 |---|---|

@@ -275,9 +275,9 @@ if (benchSupported) {
     // classpath alone and never reaches main's.
     loom.createRemapConfigurations(sourceSets.bench)
 
-    sourceSets.bench.java.exclude 'com/wf/gemrender/bench/BenchEvents.java'
-    sourceSets.bench.java.exclude 'com/wf/gemrender/bench/McgltfDriver.java'
-    sourceSets.bench.java.exclude 'com/wf/gemrender/bench/SbmDriver.java'
+    sourceSets.bench.java.exclude 'com/hex/hexrender/bench/BenchEvents.java'
+    sourceSets.bench.java.exclude 'com/hex/hexrender/bench/McgltfDriver.java'
+    sourceSets.bench.java.exclude 'com/hex/hexrender/bench/SbmDriver.java'
 } else {
     sourceSets.bench.java.setSrcDirs([])
     sourceSets.bench.resources.setSrcDirs([])
@@ -316,14 +316,14 @@ dependencies {
 // BuiltinItemRendererRegistry binding in DirectSpike's Fabric init(), so the item, its renderer and
 // its model files are NOT excluded any more -- -Pdirectitem, -Pdirecttotem and -Pdirecthand all
 // run on this loader now. SpikeItems itself holds only the id, the properties and the instance.
-sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItemEvents.java'
+sourceSets.harness.java.exclude 'com/hex/hexrender/spike/SpikeItemEvents.java'
 
 if (!direct_supported.toBoolean()) {
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/DirectSpike.java'
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItem.java'
-    sourceSets.harness.java.exclude 'com/wf/gemrender/spike/SpikeItems.java'
-    sourceSets.harness.resources.exclude 'assets/gemrender/items/**'
-    sourceSets.harness.resources.exclude 'assets/gemrender/models/item/**'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/DirectSpike.java'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/SpikeItem.java'
+    sourceSets.harness.java.exclude 'com/hex/hexrender/spike/SpikeItems.java'
+    sourceSets.harness.resources.exclude 'assets/hexrender/items/**'
+    sourceSets.harness.resources.exclude 'assets/hexrender/models/item/**'
 }
 
 // Two model files dress the one item and only one of them is ever right: items/spike.json plus
@@ -331,10 +331,10 @@ if (!direct_supported.toBoolean()) {
 // wrong one is a resource-pack error on load, not a silent no-op. build.gradle chooses the same way.
 if (harness_supported.toBoolean()) {
     if (stonecutter.eval(mcVersion, '>=26.1')) {
-        sourceSets.harness.resources.exclude 'assets/gemrender/models/item/spike.json'
+        sourceSets.harness.resources.exclude 'assets/hexrender/models/item/spike.json'
     } else {
-        sourceSets.harness.resources.exclude 'assets/gemrender/items/**'
-        sourceSets.harness.resources.exclude 'assets/gemrender/models/item/spike_base.json'
+        sourceSets.harness.resources.exclude 'assets/hexrender/items/**'
+        sourceSets.harness.resources.exclude 'assets/hexrender/models/item/spike_base.json'
     }
 }
 
@@ -342,38 +342,38 @@ if (harness_supported.toBoolean()) {
 // reach javac at all: its sources name loader events and Flywheel backend internals that are not on
 // this node's classpath, and a `//? if` guard cannot remove a whole package.
 if (!irisSupported) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/iris/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/iris/**'
 }
 
 // Each bridge's mixins go in only when that bridge is resolvable here. A mixin named in a `required`
 // config whose target class is missing is a load-time warning on every launch; a config naming a
 // class that was never compiled is a hard failure.
 if (!irisSupported || !irisflw_version) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/irisflw/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/mixin/irisflw/**'
     sourceSets.main.resources.exclude 'gemrender.irisflw.mixins.json'
 }
 
 if (!irisSupported || !colorwheel_version) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/mixin/colorwheel/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/mixin/colorwheel/**'
     sourceSets.main.resources.exclude 'gemrender.colorwheel.mixins.json'
 }
 
 def directMixinSet = stonecutter.eval(mcVersion, '>=26.1') ? 'direct26' : 'direct'
 ['direct', 'direct26'].each { set ->
     if (!direct_supported.toBoolean() || set != directMixinSet) {
-        sourceSets.main.java.exclude "com/wf/gemrender/mixin/${set}/**"
+        sourceSets.main.java.exclude "com/hex/hexrender/mixin/${set}/**"
         sourceSets.main.resources.exclude "gemrender.${set}.mixins.json"
     }
 }
 
 if (!direct_supported.toBoolean()) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/direct/**'
+    sourceSets.main.java.exclude 'com/hex/hexrender/direct/**'
 }
 
 // The three annotated event subscribers, and the only parts of their subsystems that are Forge or
 // NeoForge only: two are a class of @SubscribeEvent methods taking RenderLevelStageEvent, a type
 // that does not exist here, and the third a client tick taking ClientTickEvent.Post. What they do is
-// done on this loader by the classes in com/wf/gemrender/fabric/, which register the Fabric API
+// done on this loader by the classes in com/hex/hexrender/fabric/, which register the Fabric API
 // events that land on the same instructions and call the same methods. build.gradle excludes that
 // package for the mirror-image reason.
 //
@@ -381,18 +381,18 @@ if (!direct_supported.toBoolean()) {
 // and every class under direct/ are loader-neutral once the event type is off their signatures --
 // the split takes a LevelStage now, which either loader can fill, and the direct path's stage
 // handlers carried no event data at all. The direct mixins target vanilla, not the loader.
-sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplitEvents.java'
-sourceSets.main.java.exclude 'com/wf/gemrender/direct/DirectEvents.java'
-sourceSets.main.java.exclude 'com/wf/gemrender/iris/IrisPbrEvents.java'
+sourceSets.main.java.exclude 'com/hex/hexrender/water/WaterSplitEvents.java'
+sourceSets.main.java.exclude 'com/hex/hexrender/direct/DirectEvents.java'
+sourceSets.main.java.exclude 'com/hex/hexrender/iris/IrisPbrEvents.java'
 
 // The mixins are NOT excluded either. gemrender.mixins.json names all nine unconditionally, and
 // dropping a class here while leaving its name in a `required` config is a hard load failure;
 // dropping DrawManagerMixin means no buffer is ever uploaded and nothing draws at all. The members
 // that reach for WaterSplit are behind `//? if water` instead.
 if (!water_supported.toBoolean()) {
-    sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplit.java'
-    sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterSplitPrograms.java'
-    sourceSets.main.java.exclude 'com/wf/gemrender/water/WaterDepthPrepass.java'
+    sourceSets.main.java.exclude 'com/hex/hexrender/water/WaterSplit.java'
+    sourceSets.main.java.exclude 'com/hex/hexrender/water/WaterSplitPrograms.java'
+    sourceSets.main.java.exclude 'com/hex/hexrender/water/WaterDepthPrepass.java'
 }
 
 def gameDir = rootProject.file(
