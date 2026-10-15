@@ -406,6 +406,44 @@ configurations {
     colorwheelMod
 }
 
+// Shipped lwjgl-ktx: module-info `requires transitive org.lwjgl`; dedicated server has no org.lwjgl =>
+// FML module resolution fails. Jar-in-jar copy = automatic module org.lwjgl.ktx (no requires); its
+// classes link only on the client.
+def ktxAutomatic = Attribute.of('gemrender.ktxAutomaticModule', Boolean)
+
+abstract class KtxAutomaticModule implements TransformAction<org.gradle.api.artifacts.transform.TransformParameters.None> {
+    @InputArtifact
+    abstract Provider<FileSystemLocation> getInputArtifact()
+
+    @Override
+    void transform(TransformOutputs outputs) {
+        def input = inputArtifact.get().asFile
+        if (!(input.name ==~ /lwjgl-ktx-[0-9.]+\.jar/)) {
+            outputs.file(input)
+            return
+        }
+        def output = outputs.file(input.name)
+        new java.util.zip.ZipFile(input).withCloseable { zip ->
+            new java.util.zip.ZipOutputStream(output.newOutputStream()).withCloseable { out ->
+                zip.entries().each { e ->
+                    if (e.name.endsWith('module-info.class')) return
+                    out.putNextEntry(new java.util.zip.ZipEntry(e.name))
+                    if (e.name == 'META-INF/MANIFEST.MF') {
+                        def mf = new java.util.jar.Manifest(zip.getInputStream(e))
+                        mf.mainAttributes.putValue('Automatic-Module-Name', 'org.lwjgl.ktx')
+                        mf.write(out)
+                    } else {
+                        out << zip.getInputStream(e)
+                    }
+                    out.closeEntry()
+                }
+            }
+        }
+    }
+}
+
+configurations.named('jarJar') { attributes.attribute(ktxAutomatic, true) }
+
 def flywheelDep = flywheelVendored ? null : "dev.engine-room.flywheel:${flywheel_artifact}:${flywheel_version}"
 def modConf = { String name -> isLegacy ? "mod${name.capitalize()}" : name }
 
@@ -447,6 +485,13 @@ dependencies {
     for (platform in ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64']) {
         add(ktxRuntime, "org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
         jarJar("org.lwjgl:lwjgl-ktx:${ktx_version}:${platform}") { transitive = false }
+    }
+
+    attributesSchema { attribute(ktxAutomatic) }
+    artifactTypes.getByName('jar').attributes.attribute(ktxAutomatic, false)
+    registerTransform(KtxAutomaticModule) {
+        from.attribute(ktxAutomatic, false).attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, 'jar')
+        to.attribute(ktxAutomatic, true).attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, 'jar')
     }
 
     if (project.findProperty('sodium_standalone_version')) {
