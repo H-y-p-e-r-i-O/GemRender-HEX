@@ -14,6 +14,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import com.wf.gemrender.texture.VariantUv;
+import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 
@@ -191,7 +192,11 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
     //? if >=1.21 <26.1 {
     @Override
     public void renderToBuffer(PoseStack pose, VertexConsumer buffer, int light, int overlay, int colour) {
-        render(pose, light, overlay);
+        if (IrisDirectBridge.isShaderPackInUse()) {
+            renderVanilla(pose, buffer, light, overlay, colour);
+        } else {
+            render(pose, light, overlay);
+        }
     }
     //?}
 
@@ -199,7 +204,16 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
 	/*@Override
 	public void renderToBuffer(PoseStack pose, VertexConsumer buffer, int light, int overlay,
 			float red, float green, float blue, float alpha) {
-		render(pose, light, overlay);
+        if (IrisDirectBridge.isShaderPackInUse()) {
+            int r = (int) (red * 255.0f);
+            int g = (int) (green * 255.0f);
+            int b = (int) (blue * 255.0f);
+            int a = (int) (alpha * 255.0f);
+            int colour = (a << 24) | (r << 16) | (g << 8) | b;
+            renderVanilla(pose, buffer, light, overlay, colour);
+        } else {
+            render(pose, light, overlay);
+        }
 	}
 	*///?}
 
@@ -287,6 +301,76 @@ public class GemRenderArmorModel extends HumanoidModel<LivingEntity> {
                         .mul(nodeMatrix(table, state, at));
                 DirectRenderer.submit(child, childState, socketMatrix, light, overlay, tint, DirectPass.LEVEL,
                         VariantUv.NONE);
+            });
+        } finally {
+            pose.popPose();
+        }
+    }
+
+    private void renderVanilla(PoseStack pose, VertexConsumer buffer, int light, int overlay, int colour) {
+        if (entity == null || stack == null || slot == null || !pending) {
+            return;
+        }
+        pending = false;
+
+        GemRenderGltfModel model = appearance.model(entity, stack, slot);
+        if (model == null) {
+            return;
+        }
+
+        NodeTable table = model.layout()
+                .nodeTable();
+        int[] binding = bindings.computeIfAbsent(model, key -> resolve(table));
+
+        float[] state = table.newScratch();
+        applyPart(table, state, binding[0], head);
+        applyPart(table, state, binding[1], body);
+        applyPart(table, state, binding[2], leftArm);
+        applyPart(table, state, binding[3], rightArm);
+        applyPart(table, state, binding[4], leftLeg);
+        applyPart(table, state, binding[5], rightLeg);
+        ArmorRig bodyRig = rig;
+        if (bodyRig != null) {
+            bodyRig.pose(this, table, state, binding);
+        }
+
+        pose.pushPose();
+        try {
+            pose.scale(-1.0f, -1.0f, 1.0f);
+
+            int tint = appearance.tint(entity, stack, slot);
+            if (tint == 0xFFFFFFFF && colour != 0xFFFFFFFF) {
+                tint = colour;
+            }
+            GltfVanillaRenderer.renderToConsumer(model, state, pose, buffer, light, overlay,
+                    tint, appearance.variant(entity, stack, slot));
+
+            final int finalTint = tint;
+            appearance.attachments(entity, stack, slot, (child, socket, childPose) -> {
+                int at = table.slotOfName(socket);
+                if (at < 0) {
+                    if (missingSockets.add(model)) {
+                        GemRender.LOGGER.warn("GemRender armour model has no socket node '{}'; attachment skipped", socket);
+                    }
+                    return;
+                }
+                float[] childState = child.layout()
+                        .nodeTable()
+                        .newScratch();
+                if (childPose != null) {
+                    childPose.pose(child.layout()
+                            .nodeTable(), childState);
+                }
+                pose.pushPose();
+                try {
+                    Matrix4f childMatrix = nodeMatrix(table, state, at);
+                    pose.last().pose().mul(childMatrix);
+                    pose.last().normal().mul(new Matrix3f(childMatrix));
+                    GltfVanillaRenderer.renderToConsumer(child, childState, pose, buffer, light, overlay,
+                            finalTint, VariantUv.NONE);
+                } finally {
+                    pose.popPose();
+                }
             });
         } finally {
             pose.popPose();

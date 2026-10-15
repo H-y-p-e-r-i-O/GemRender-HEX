@@ -266,7 +266,40 @@ public class GemRenderItemRenderer extends BlockEntityWithoutLevelRenderer {
     @Override
     public void renderByItem(ItemStack stack, ItemDisplayContext context, PoseStack pose,
                              MultiBufferSource buffers, int light, int overlay) {
-        draw(stack, context, pose, light, overlay);
+        if (IrisDirectBridge.isShaderPackInUse()) {
+            drawVanilla(stack, context, pose, buffers, light, overlay);
+        } else {
+            draw(stack, context, pose, light, overlay);
+        }
+    }
+
+    private void drawVanilla(ItemStack stack, ItemDisplayContext context, PoseStack pose,
+                             MultiBufferSource buffers, int light, int overlay) {
+        GemRenderGltfModel model = appearance.model(stack, context);
+        if (model == null) {
+            return;
+        }
+
+        float partialTick = Vanilla.partialTick();
+
+        pose.pushPose();
+        try {
+            pose.translate(0.5f, 0.5f, 0.5f);
+            appearance.transform(stack, context, pose);
+
+            if (appearance.blend(stack, context, partialTick, blend.clear())) {
+                GltfVanillaRenderer.render(model, blend, pose, buffers, light, overlay,
+                        appearance.tint(stack, context), appearance.variant(stack, context),
+                        appearance.slots(stack, context));
+            } else {
+                GltfVanillaRenderer.render(model, appearance.clip(stack, context),
+                        appearance.seconds(stack, context, partialTick), pose, buffers, light, overlay,
+                        appearance.tint(stack, context), appearance.variant(stack, context),
+                        appearance.slots(stack, context));
+            }
+        } finally {
+            pose.popPose();
+        }
     }
     //?}
 
@@ -316,13 +349,13 @@ public class GemRenderItemRenderer extends BlockEntityWithoutLevelRenderer {
             if (appearance.blend(stack, context, partialTick, blend.clear())) {
                 DirectRenderer.submit(model, blend, pose.last()
                                 .pose(), light, overlay, appearance.tint(stack, context), passFor(context),
-                        appearance.variant(stack, context));
+                        appearance.variant(stack, context), appearance.slots(stack, context));
             } else {
                 DirectRenderer.submit(model, appearance.clip(stack, context),
                         appearance.seconds(stack, context, partialTick), pose.last()
                                 .pose(),
                         light, overlay, appearance.tint(stack, context), passFor(context),
-                        appearance.variant(stack, context));
+                        appearance.variant(stack, context), appearance.slots(stack, context));
             }
         } finally {
             pose.popPose();
