@@ -11,6 +11,7 @@ import org.lwjgl.system.libffi.FFIType;
 import org.lwjgl.util.ktx.ktxBasisParams;
 import org.lwjgl.util.ktx.ktxTexture2;
 import org.lwjgl.util.ktx.ktxTextureCreateInfo;
+import org.lwjgl.util.ktx.ktxTexture_vtbl;
 
 import java.nio.ByteBuffer;
 
@@ -43,7 +44,7 @@ final class Libktx {
     private static final Function CREATE_FROM_MEMORY = new Function("ktxTexture2_CreateFromMemory", ffi_type_sint32,
             ffi_type_pointer, ffi_type_pointer, ffi_type_uint32, ffi_type_pointer);
     private static final Function ERROR_STRING = new Function("ktxErrorString", ffi_type_pointer, ffi_type_sint32);
-    private static final Function DESTROY = new Function("ktxTexture2_Destroy", ffi_type_void, ffi_type_pointer);
+    private static final Function DESTROY = new Function(ffi_type_void, ffi_type_pointer);
     private static final Function NEEDS_TRANSCODING = new Function("ktxTexture2_NeedsTranscoding", ffi_type_uint8,
             ffi_type_pointer);
     private static final Function TRANSCODE_BASIS = new Function("ktxTexture2_TranscodeBasis", ffi_type_sint32,
@@ -52,11 +53,13 @@ final class Libktx {
             ffi_type_pointer, ffi_type_uint32, ffi_type_uint32, ffi_type_uint32, ffi_type_pointer);
     private static final Function CREATE = new Function("ktxTexture2_Create", ffi_type_sint32,
             ffi_type_pointer, ffi_type_sint32, ffi_type_pointer);
-    private static final Function SET_IMAGE_FROM_MEMORY = new Function("ktxTexture2_SetImageFromMemory",
+    private static final Function SET_IMAGE_FROM_MEMORY = new Function(
             ffi_type_sint32, ffi_type_pointer, ffi_type_uint32, ffi_type_uint32, ffi_type_uint32, ffi_type_pointer,
             ffi_type_pointer);
     private static final Function COMPRESS_BASIS_EX = new Function("ktxTexture2_CompressBasisEx", ffi_type_sint32,
             ffi_type_pointer, ffi_type_pointer);
+    private static final Function WRITE_TO_MEMORY = new Function(ffi_type_sint32,
+            ffi_type_pointer, ffi_type_pointer, ffi_type_pointer);
 
     private Libktx() {
     }
@@ -76,7 +79,10 @@ final class Libktx {
     }
 
     static void destroy(long texture) {
-        DESTROY.call(texture);
+        if (texture == MemoryUtil.NULL) return;
+        long vtbl = MemoryUtil.memGetAddress(texture + ktxTexture2.VTBL);
+        long destroyFunc = ktxTexture_vtbl.nDestroy(vtbl);
+        DESTROY.callAt(destroyFunc, texture);
     }
 
     static boolean needsTranscoding(ktxTexture2 texture) {
@@ -92,11 +98,20 @@ final class Libktx {
     }
 
     static int setImageFromMemory(long texture, ByteBuffer pixels) {
-        return (int) SET_IMAGE_FROM_MEMORY.call(texture, 0, 0, 0, MemoryUtil.memAddress(pixels), pixels.remaining());
+        long vtbl = MemoryUtil.memGetAddress(texture + ktxTexture2.VTBL);
+        long setImageFunc = ktxTexture_vtbl.nSetImageFromMemory(vtbl);
+        return (int) SET_IMAGE_FROM_MEMORY.callAt(setImageFunc, texture, 0, 0, 0,
+                MemoryUtil.memAddress(pixels), pixels.remaining());
     }
 
     static int compressBasisEx(ktxTexture2 texture, ktxBasisParams params) {
         return (int) COMPRESS_BASIS_EX.call(texture.address(), params.address());
+    }
+
+    static int writeToMemory(long texture, PointerBuffer out, PointerBuffer size) {
+        long vtbl = MemoryUtil.memGetAddress(texture + ktxTexture2.VTBL);
+        long writeFunc = ktxTexture_vtbl.nWriteToMemory(vtbl);
+        return (int) WRITE_TO_MEMORY.callAt(writeFunc, texture, out.address(), size.address());
     }
 
     /** Image data, {@code dataSize} bytes; null when there is none. */
@@ -114,10 +129,18 @@ final class Libktx {
         private final FFICIF cif = FFICIF.malloc();
         private final int arity;
 
+        Function(FFIType result, FFIType... arguments) {
+            this(null, result, arguments);
+        }
+
         Function(String name, FFIType result, FFIType... arguments) {
-            address = LIBRARY.getFunctionAddress(name);
-            if (address == MemoryUtil.NULL) {
-                throw new UnsatisfiedLinkError("libktx has no " + name);
+            if (name != null) {
+                address = LIBRARY.getFunctionAddress(name);
+                if (address == MemoryUtil.NULL) {
+                    throw new UnsatisfiedLinkError("libktx has no " + name);
+                }
+            } else {
+                address = MemoryUtil.NULL;
             }
             arity = arguments.length;
             PointerBuffer types = MemoryUtil.memAllocPointer(arity);
@@ -126,12 +149,16 @@ final class Libktx {
             }
             types.flip();
             if (ffi_prep_cif(cif, FFI_DEFAULT_ABI, result, types) != FFI_OK) {
-                throw new UnsatisfiedLinkError("libffi rejected " + name);
+                throw new UnsatisfiedLinkError("libffi rejected " + (name != null ? name : "cif"));
             }
         }
 
         /** Each argument in an 8-byte slot (narrower types read its low bytes: little-endian only). */
         long call(long... arguments) {
+            return callAt(address, arguments);
+        }
+
+        long callAt(long targetAddress, long... arguments) {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 ByteBuffer slots = stack.malloc(8, 8 * Math.max(1, arity));
                 PointerBuffer values = stack.mallocPointer(arity);
@@ -141,7 +168,7 @@ final class Libktx {
                 }
                 ByteBuffer result = stack.malloc(8, 8);
                 result.putLong(0, 0);
-                ffi_call(cif, address, result, values);
+                ffi_call(cif, targetAddress, result, values);
                 return result.getLong(0);
             }
         }
