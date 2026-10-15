@@ -95,6 +95,11 @@ public final class GltfImporter {
             }
 
             @Override
+            public void slice(NodeModel owner, RigPatch.Plane plane) {
+                RigSlicer.slice(owner, plane);
+            }
+
+            @Override
             public void weigh(NodeModel owner, RigPatch.Weigher weigher) {
                 weighers.put(owner, weigher);
             }

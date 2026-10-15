@@ -20,8 +20,20 @@ public interface RigPatch {
         /** New joint under {@code parent}, identity rest. */
         NodeModel addJoint(NodeModel parent, String name);
 
+        /**
+         * Splits {@code owner}'s triangles crossing {@code plane} (owner space, affine) at it: weights can then change
+         * exactly there. Float attributes only. Before {@link #weigh}.
+         */
+        void slice(NodeModel owner, Plane plane);
+
         /** {@code owner}'s unskinned primitives: vertex position (owner space) -> weights. */
         void weigh(NodeModel owner, Weigher weigher);
+    }
+
+    /** Signed distance, affine in position: lerp along an edge must reach 0 where the plane is. */
+    @FunctionalInterface
+    interface Plane {
+        float distance(float x, float y, float z);
     }
 
     @FunctionalInterface
